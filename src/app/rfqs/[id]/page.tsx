@@ -442,36 +442,41 @@ function ClarifyStep({
             id: q.id,
             text: q.question,
             required: q.required,
+            rationale: q.rationale,
+            confidence: q.confidence,
+            options: q.options as string[] | undefined,
             answer: savedAnswers?.[q.id] ?? null as string | null,
         }))
-        : DEMO_CLARIFIER.questions.map(q => ({ ...q, answer: q.answer as string | null }));
+        : DEMO_CLARIFIER.questions.map(q => ({
+            ...q,
+            rationale: "",
+            confidence: 0.8,
+            options: undefined as string[] | undefined,
+            answer: q.answer as string | null,
+        }));
 
     const assumptions = hasClarifier
-        ? cl.assumptions.map(a => ({ id: a.id, text: a.assumption }))
-        : DEMO_CLARIFIER.assumptions.map((a, i) => ({ id: `a${i}`, text: a }));
+        ? cl.assumptions.map(a => ({ id: a.id, text: a.assumption, confidence: a.confidence }))
+        : DEMO_CLARIFIER.assumptions.map((a, i) => ({ id: `a${i}`, text: a, confidence: 0.9 }));
 
     const riskFlags = hasClarifier
-        ? cl.riskFlags.map(r => ({ id: r.id, text: r.label, severity: r.severity }))
-        : DEMO_CLARIFIER.riskFlags.map((r, i) => ({ id: `r${i}`, text: r, severity: "high" as const }));
+        ? cl.riskFlags.map(r => ({ id: r.id, text: r.label, severity: r.severity, evidenceSnippet: r.evidenceSnippet }))
+        : DEMO_CLARIFIER.riskFlags.map((r, i) => ({ id: `r${i}`, text: r, severity: "high" as const, evidenceSnippet: "" }));
 
     const [localAnswers, setLocalAnswers] = useState<Record<string, string>>(savedAnswers ?? {});
     const [confirmedIds, setConfirmedIds] = useState<Set<string>>(new Set(savedAssumptions ?? []));
-    const [allAssumptionsAccepted, setAllAssumptionsAccepted] = useState(
-        assumptions.every(a => (savedAssumptions ?? []).includes(a.id))
-    );
     const [saving, setSaving] = useState(false);
 
     const requiredDone = questions.filter(q => q.required).every(
         q => localAnswers[q.id]?.trim()
     );
-    const canProceed = requiredDone && allAssumptionsAccepted;
+    const allAssumptionsConfirmed = assumptions.length === 0 || assumptions.every(a => confirmedIds.has(a.id));
+    const canProceed = requiredDone && allAssumptionsConfirmed;
 
     const handleProceed = async () => {
         setSaving(true);
         try {
-            const assumptionIds = allAssumptionsAccepted
-                ? assumptions.map(a => a.id)
-                : Array.from(confirmedIds);
+            const assumptionIds = Array.from(confirmedIds);
 
             const res = await fetch(`/api/rfqs/${rfqId}`, {
                 method: "PATCH",
@@ -499,41 +504,99 @@ function ClarifyStep({
         <div className="space-y-4">
             {/* Questions */}
             <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    {hasClarifier ? "Gemini Questions" : "AI Questions (demo)"}
-                    {" "}<Badge variant="outline" className="ml-1 text-[10px]">Required</Badge>
-                </p>
+                <div className="mb-2 flex items-center gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        Questions
+                    </p>
+                    {hasClarifier ? (
+                        <Badge variant="outline" className="gap-1 text-[10px] border-violet-200 text-violet-700 dark:border-violet-900/50 dark:text-violet-400">
+                            <Sparkles className="h-2.5 w-2.5" />
+                            Gemini{cl.model ? ` · ${cl.model.split("-").slice(-2).join("-")}` : ""}
+                        </Badge>
+                    ) : (
+                        <Badge variant="outline" className="text-[10px] text-muted-foreground">Demo</Badge>
+                    )}
+                </div>
                 <div className="space-y-3">
-                    {questions.map((q) => (
-                        <div
-                            key={q.id}
-                            className={cn(
-                                "rounded-lg border p-3",
-                                q.required && !localAnswers[q.id]
-                                    ? "border-amber-200 bg-amber-50/30 dark:border-amber-900/30 dark:bg-amber-950/10"
-                                    : "border-border"
-                            )}
-                        >
-                            <div className="flex items-start gap-2 mb-2">
-                                <HelpCircle className={cn(
-                                    "mt-0.5 h-3.5 w-3.5 flex-shrink-0",
-                                    q.required ? "text-amber-500" : "text-muted-foreground/50"
-                                )} />
-                                <p className="text-sm">
-                                    {q.text}
-                                    {!q.required && (
-                                        <span className="ml-1.5 text-[10px] text-muted-foreground">(optional)</span>
-                                    )}
-                                </p>
+                    {questions.map((q) => {
+                        const answered = !!localAnswers[q.id]?.trim();
+                        const confPct = Math.round(q.confidence * 100);
+                        return (
+                            <div
+                                key={q.id}
+                                className={cn(
+                                    "rounded-lg border p-3",
+                                    answered
+                                        ? "border-emerald-200 bg-emerald-50/30 dark:border-emerald-900/30 dark:bg-emerald-950/10"
+                                        : q.required
+                                            ? "border-amber-200 bg-amber-50/30 dark:border-amber-900/30 dark:bg-amber-950/10"
+                                            : "border-border"
+                                )}
+                            >
+                                <div className="flex items-start gap-2 mb-1.5">
+                                    <HelpCircle className={cn(
+                                        "mt-0.5 h-3.5 w-3.5 flex-shrink-0",
+                                        answered ? "text-emerald-500" : q.required ? "text-amber-500" : "text-muted-foreground/50"
+                                    )} />
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm">
+                                            {q.text}
+                                            {!q.required && (
+                                                <span className="ml-1.5 text-[10px] text-muted-foreground">(optional)</span>
+                                            )}
+                                        </p>
+                                        <div className="mt-1 flex items-center gap-2">
+                                            {q.confidence > 0 && (
+                                                <span className={cn(
+                                                    "text-[10px] font-medium",
+                                                    confPct >= 85 ? "text-emerald-600 dark:text-emerald-400"
+                                                        : confPct >= 65 ? "text-amber-600 dark:text-amber-400"
+                                                            : "text-red-600 dark:text-red-400"
+                                                )}>
+                                                    {confPct}% relevance
+                                                </span>
+                                            )}
+                                            {q.rationale && (
+                                                <span className="text-[10px] text-muted-foreground/60 truncate">
+                                                    — {q.rationale}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                                {q.options && q.options.length > 0 ? (
+                                    <div className="space-y-1 mt-2">
+                                        {q.options.map((opt) => (
+                                            <label key={opt} className="flex items-center gap-2 cursor-pointer">
+                                                <input
+                                                    type="radio"
+                                                    name={q.id}
+                                                    value={opt}
+                                                    checked={localAnswers[q.id] === opt}
+                                                    onChange={() => setLocalAnswers(prev => ({ ...prev, [q.id]: opt }))}
+                                                    className="h-3.5 w-3.5 accent-foreground"
+                                                />
+                                                <span className="text-sm">{opt}</span>
+                                            </label>
+                                        ))}
+                                        <Input
+                                            placeholder="Or type a custom answer…"
+                                            value={q.options.includes(localAnswers[q.id] ?? "") ? "" : (localAnswers[q.id] ?? "")}
+                                            onChange={(e) => setLocalAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                                            className="mt-2 text-sm"
+                                        />
+                                    </div>
+                                ) : (
+                                    <Input
+                                        placeholder="Your answer…"
+                                        value={localAnswers[q.id] ?? ""}
+                                        onChange={(e) => setLocalAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                                        className="text-sm"
+                                    />
+                                )}
                             </div>
-                            <Input
-                                placeholder="Your answer…"
-                                value={localAnswers[q.id] ?? ""}
-                                onChange={(e) => setLocalAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
-                                className="text-sm"
-                            />
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             </div>
 
@@ -542,16 +605,55 @@ function ClarifyStep({
             {/* Assumptions */}
             {assumptions.length > 0 && (
                 <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        Assumptions
-                    </p>
-                    <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
-                        {assumptions.map((a) => (
-                            <div key={a.id} className="flex items-start gap-2 text-sm">
-                                <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-blue-500" />
-                                <span className="text-muted-foreground">{a.text}</span>
-                            </div>
-                        ))}
+                    <div className="mb-2 flex items-center justify-between">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                            Assumptions
+                        </p>
+                        <span className="text-[10px] text-muted-foreground">
+                            {assumptions.filter(a => confirmedIds.has(a.id)).length}/{assumptions.length} accepted
+                        </span>
+                    </div>
+                    <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border overflow-hidden">
+                        {assumptions.map((a) => {
+                            const isAccepted = confirmedIds.has(a.id);
+                            const toggleAssumption = () => {
+                                setConfirmedIds(prev => {
+                                    const next = new Set(prev);
+                                    if (isAccepted) next.delete(a.id); else next.add(a.id);
+                                    return next;
+                                });
+                            };
+                            return (
+                                <div
+                                    key={a.id}
+                                    className={cn(
+                                        "flex items-start justify-between gap-3 px-3 py-2.5 transition-colors",
+                                        isAccepted && "bg-emerald-50/50 dark:bg-emerald-950/10"
+                                    )}
+                                >
+                                    <div className="flex items-start gap-2 min-w-0">
+                                        <Info className={cn(
+                                            "mt-0.5 h-3.5 w-3.5 flex-shrink-0",
+                                            isAccepted ? "text-emerald-500" : "text-blue-500"
+                                        )} />
+                                        <span className="text-sm text-muted-foreground">{a.text}</span>
+                                    </div>
+                                    <button
+                                        onClick={toggleAssumption}
+                                        className={cn(
+                                            "flex-shrink-0 flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium transition-colors",
+                                            isAccepted
+                                                ? "border-emerald-200 bg-emerald-100 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-400"
+                                                : "border-border text-muted-foreground hover:bg-accent hover:text-foreground"
+                                        )}
+                                    >
+                                        {isAccepted ? (
+                                            <><CheckCircle2 className="h-3 w-3" /> Accepted</>
+                                        ) : "Accept"}
+                                    </button>
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
             )}
@@ -567,17 +669,24 @@ function ClarifyStep({
                             <div
                                 key={rf.id}
                                 className={cn(
-                                    "flex items-start gap-2 rounded-lg border p-3 text-sm",
+                                    "rounded-lg border p-3",
                                     rf.severity === "high"
                                         ? "border-red-200 bg-red-50/30 dark:border-red-900/30 dark:bg-red-950/10"
                                         : "border-amber-200 bg-amber-50/20 dark:border-amber-900/30"
                                 )}
                             >
-                                <AlertTriangle className={cn(
-                                    "mt-0.5 h-3.5 w-3.5 flex-shrink-0",
-                                    rf.severity === "high" ? "text-red-500" : "text-amber-500"
-                                )} />
-                                <span className="text-muted-foreground">{rf.text}</span>
+                                <div className="flex items-start gap-2 text-sm">
+                                    <AlertTriangle className={cn(
+                                        "mt-0.5 h-3.5 w-3.5 flex-shrink-0",
+                                        rf.severity === "high" ? "text-red-500" : "text-amber-500"
+                                    )} />
+                                    <span className="text-muted-foreground">{rf.text}</span>
+                                </div>
+                                {rf.evidenceSnippet && (
+                                    <p className="mt-1.5 ml-5 font-mono text-[10px] text-muted-foreground/60 italic truncate">
+                                        &ldquo;{rf.evidenceSnippet}&rdquo;
+                                    </p>
+                                )}
                             </div>
                         ))}
                     </div>
@@ -585,18 +694,6 @@ function ClarifyStep({
             )}
 
             <Separator />
-
-            <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                    type="checkbox"
-                    checked={allAssumptionsAccepted}
-                    onChange={e => setAllAssumptionsAccepted(e.target.checked)}
-                    className="h-4 w-4 rounded border-input"
-                />
-                <span className="text-sm text-muted-foreground">
-                    I confirm all assumptions above are acceptable for this quote
-                </span>
-            </label>
 
             <Button onClick={handleProceed} disabled={!canProceed || saving} className="w-full gap-2">
                 {saving ? (
@@ -609,7 +706,7 @@ function ClarifyStep({
                 <p className="text-center text-xs text-muted-foreground">
                     {!requiredDone
                         ? "Answer all required questions to unlock quoting"
-                        : "Accept assumptions to continue"}
+                        : "Accept all assumptions to continue"}
                 </p>
             )}
         </div>
@@ -875,9 +972,17 @@ function DocumentViewer({ text, title }: { text: string; title: string }) {
 // ── Similar Jobs Panel ──────────────────────────────────────────────────────
 
 function SimilarJobsPanel({ rfqId }: { rfqId: string }) {
-    type SimilarEntry = { id: string; customerName: string; subject: string; quote: { totals: { total: number } } | null; score: number; reasons: string[] };
+    type SimilarEntry = {
+        id: string;
+        customerName: string;
+        subject: string;
+        quote: { lineItems: Array<{ label: string; amount: number; type: string }>; totals: { total: number; marginPct: number } } | null;
+        score: number;
+        reasons: string[];
+    };
     const [similar, setSimilar] = useState<SimilarEntry[]>([]);
     const [loading, setLoading] = useState(false);
+    const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null);
 
     useEffect(() => {
         setLoading(true);
@@ -914,45 +1019,92 @@ function SimilarJobsPanel({ rfqId }: { rfqId: string }) {
     }, [rfqId]);
 
     return (
-        <div className="rounded-lg border border-border">
+        <div className="rounded-lg border border-border overflow-hidden">
             <div className="flex items-center gap-2 border-b border-border px-3 py-2">
                 <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     Similar Jobs
                 </span>
             </div>
-            <div className="p-2 space-y-1">
-                {loading && <Skeleton className="h-10 w-full" />}
+            <div className="divide-y divide-border">
+                {loading && (
+                    <div className="p-2 space-y-1">
+                        <Skeleton className="h-10 w-full" />
+                        <Skeleton className="h-10 w-full" />
+                    </div>
+                )}
                 {!loading && similar.length === 0 && (
-                    <p className="px-2 py-3 text-[11px] text-muted-foreground">
+                    <p className="px-3 py-3 text-[11px] text-muted-foreground">
                         No similar jobs yet — quote a few RFQs first.
                     </p>
                 )}
-                {similar.map((s) => (
-                    <Link
-                        key={s.id}
-                        href={`/rfqs/${s.id}`}
-                        className="flex flex-col gap-1 rounded-md px-2 py-2 hover:bg-accent transition-colors"
-                    >
-                        <div className="flex items-center justify-between gap-2">
-                            <p className="text-xs font-medium truncate">{s.customerName}</p>
-                            <span className="flex-shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-mono font-semibold text-muted-foreground">
-                                {s.score}pt
-                            </span>
+                {similar.map((s) => {
+                    const isExpanded = expandedTemplate === s.id;
+                    return (
+                        <div key={s.id}>
+                            {/* Job row */}
+                            <Link
+                                href={`/rfqs/${s.id}`}
+                                className="flex flex-col gap-0.5 px-3 py-2 hover:bg-accent/40 transition-colors"
+                            >
+                                <div className="flex items-center justify-between gap-2">
+                                    <p className="text-xs font-medium truncate">{s.customerName}</p>
+                                    <span className="flex-shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-mono font-semibold text-muted-foreground">
+                                        {s.score}pt
+                                    </span>
+                                </div>
+                                <p className="text-[10px] text-muted-foreground truncate">{s.subject}</p>
+                                {s.reasons.length > 0 && (
+                                    <p className="text-[10px] text-muted-foreground/60 truncate">
+                                        {s.reasons[0]}
+                                    </p>
+                                )}
+                            </Link>
+
+                            {/* Quote total + "Use as template" toggle */}
+                            {s.quote && (
+                                <div className="flex items-center justify-between gap-2 border-t border-border/50 bg-muted/20 px-3 py-1.5">
+                                    <span className="font-mono text-[11px] font-semibold">
+                                        ${s.quote.totals.total.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                                    </span>
+                                    <button
+                                        onClick={() => setExpandedTemplate(isExpanded ? null : s.id)}
+                                        className="flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                                    >
+                                        {isExpanded ? "Hide" : "Use as template"}
+                                        <ChevronRight className={cn("h-3 w-3 transition-transform", isExpanded && "rotate-90")} />
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Expanded template view */}
+                            {isExpanded && s.quote && (
+                                <div className="border-t border-border bg-muted/30 px-3 py-2 space-y-1">
+                                    <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                        Reference Breakdown
+                                    </p>
+                                    {s.quote.lineItems.map((item, i) => (
+                                        <div key={i} className="flex items-center justify-between gap-2">
+                                            <span className="text-[11px] text-muted-foreground truncate">{item.label}</span>
+                                            <span className="flex-shrink-0 font-mono text-[11px] font-medium tabular-nums">
+                                                ${item.amount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                            </span>
+                                        </div>
+                                    ))}
+                                    <div className="mt-1 flex items-center justify-between gap-2 border-t border-border pt-1">
+                                        <span className="text-[11px] font-bold">Total</span>
+                                        <span className="font-mono text-[11px] font-bold">
+                                            ${s.quote.totals.total.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                                        </span>
+                                    </div>
+                                    <p className="text-[10px] text-muted-foreground/60">
+                                        {Math.round(s.quote.totals.marginPct * 100)}% margin · reference only
+                                    </p>
+                                </div>
+                            )}
                         </div>
-                        <p className="text-[10px] text-muted-foreground truncate">{s.subject}</p>
-                        {s.reasons.length > 0 && (
-                            <p className="text-[10px] text-muted-foreground/60 truncate">
-                                {s.reasons[0]}
-                            </p>
-                        )}
-                        {s.quote && (
-                            <p className="text-xs font-mono font-semibold text-foreground">
-                                ${s.quote.totals.total.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-                            </p>
-                        )}
-                    </Link>
-                ))}
+                    );
+                })}
             </div>
         </div>
     );
