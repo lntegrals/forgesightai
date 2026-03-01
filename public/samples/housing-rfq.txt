@@ -1,0 +1,42 @@
+RFQ — Stainless Steel Valve Housing
+
+Submitted by: Marcus Webb, FluidTech Engineering
+Date: 02/27/2026
+Subject: 316L SS Valve Housing — Prototype + First Article
+
+Hi,
+
+We need a quote for a machined valve housing for a new product line. This is a prototype run with intent to move to production (500+/year) if first articles are approved.
+
+Part Number: VH-3301-P
+Material: 316L Stainless Steel (per ASTM A276)
+Quantity: 10 prototype units
+
+Critical dimensions:
+  - Port bore: 1.000" +0.001"/-0.000"
+  - Seat bore: 0.875" ±0.0005"
+  - Overall envelope: 4.5" x 3.0" x 2.25"
+  - Tolerance general: ±0.005" unless noted
+
+Machining requirements:
+  - 5-axis CNC milling and turning required
+  - Internal cross-drillings: 3x ports, 90-degree intersecting, 0.500" dia
+  - All bores must be burr-free and chamfered
+  - Thread ports: 3/4" NPT x 4 locations
+
+Surface finish:
+  - 32 Ra on all sealing surfaces
+  - Passivation per ASTM A967 required
+  - External surfaces: 63 Ra
+
+Due Date: Needed by April 30, 2026 for engineering review
+Lead time acceptable: Up to 5 weeks
+
+Quality requirements:
+  - AS9100D / ISO 9001:2015 shop preferred
+  - CMM report required on first 5 pcs
+  - Pressure test to 500 PSI required (we can witness)
+
+We will supply a STEP file and 2D print. Please include any DFM feedback with your quote.
+
+Contact: marcus.webb@fluidtech-eng.com | (555) 892-4451

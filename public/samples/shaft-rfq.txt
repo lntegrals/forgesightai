@@ -1,0 +1,33 @@
+RFQ: Precision Drive Shaft — Production Run
+
+Customer: Lindsey Park, Apex Motion Systems
+Date: February 26, 2026
+Subject: Steel Drive Shaft — Production Qty 150
+
+We are requesting quotes for a precision drive shaft used in our servo motor assembly.
+
+Part Number: DRV-2250-B
+Material: 4140 Alloy Steel (pre-hardened, 28-32 HRC)
+Quantity: 150 units (with option for 300 additional)
+Tolerance: OD ±0.0005", length ±0.010"
+Surface Finish: 16 Ra on journal surfaces, 63 Ra elsewhere
+
+Process: CNC turning + cylindrical grinding on journals
+
+Specifications:
+  - Overall length: 6.250"
+  - Main diameter: 0.750" OD (ground finish on 2" journal each end)
+  - Keyway: 3/16" x 3/32" deep x 1.5" long, both ends
+  - Center drilled both ends per ANSI B94.11M
+
+Due Date: March 30, 2026 (firm — production schedule dependent)
+Delivery: Ship to our Reno facility
+
+Certifications:
+  - MTR (material test report) required
+  - Hardness certs required
+  - Dimensional ballooned print available on request
+
+Budget target: $95–$130/pc depending on setup amortization
+
+Contact: lpark@apexmotion.com | Direct: (555) 124-6688

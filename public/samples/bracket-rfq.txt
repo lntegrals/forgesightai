@@ -1,0 +1,32 @@
+REQUEST FOR QUOTE — Precision Mounting Bracket
+
+From: David Kim, Meridian Precision Parts
+Date: February 28, 2026
+Subject: Aluminum Mounting Bracket — Qty 500
+
+Part Number: MNT-7710-C
+Material: Aluminum 6061-T6
+Quantity: 500 pieces
+Tolerance: ±0.003"
+Surface Finish: Bead blast + hard anodize, Type III (mil-spec)
+
+Process: 3-axis CNC milling + drilling
+
+Dimensions: 3.0" x 1.75" x 0.500"
+Features:
+  - 4x through-holes (0.190" dia) on 2.500" x 1.250" bolt pattern
+  - 1x counterbore (0.375" dia x 0.25" deep)
+  - 2x tapped holes (10-32 UNF x 0.375" deep)
+
+Due Date: April 10, 2026
+Delivery: FOB shipping point
+
+Requirements:
+- Material certification (mill certs) required
+- Deburr and break all sharp edges
+- 100% dimensional inspection — first 50 pcs
+- Package individually in anti-static bags
+
+Please quote standard lead time and expedite pricing for 3-week delivery.
+
+Contact: david.kim@meridianprecision.com | (555) 347-9012
