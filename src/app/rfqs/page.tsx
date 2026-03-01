@@ -15,6 +15,7 @@ import {
     Circle,
     Zap,
     MessageSquare,
+    Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -191,61 +192,86 @@ function NewRfqDialog({ onCreated }: { onCreated: () => void }) {
 
 // ── Ask ForgeSight Panel ────────────────────────────────────────────────────
 
+// ── Ask Result type ──────────────────────────────────────────────────────────
+
+interface AskResult {
+    answerMarkdown: string | null;
+    summaryError: string | null;
+    usedFallbackPlan?: boolean;
+    citations: string[];
+    results: Array<{ id: string; customerName: string; subject: string; status: string; totalQuoted?: number }>;
+}
+
 function AskPanel() {
     const [query, setQuery] = useState("");
-    const [answer, setAnswer] = useState<string | null>(null);
+    const [result, setResult] = useState<AskResult | null>(null);
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
 
-    const handleAsk = async () => {
-        if (!query.trim()) return;
+    const handleAsk = async (q?: string) => {
+        const question = (q ?? query).trim();
+        if (!question) return;
+        if (q) setQuery(q);
         setLoading(true);
-        setAnswer(null);
+        setResult(null);
+        setErrorMsg(null);
         try {
             const res = await fetch("/api/assistant/query", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question: query }),
+                body: JSON.stringify({ question }),
             });
-            if (res.ok) {
-                const data = await res.json();
-                // API returns {answer, citations} or {error}
-                const ans = data.answer ?? data.summary ?? data.narrative;
-                const citations = (data.citations ?? []) as Array<{ rfqId?: string; id?: string }>;
-                const citStr = citations.length > 0
-                    ? "\n\nCiting: " + citations.map((c) => c.rfqId ?? c.id ?? "?").join(", ")
-                    : "";
-                setAnswer(ans ? ans + citStr : "No answer returned — check GEMINI_API_KEY.");
-            } else {
-                const err = await res.json().catch(() => ({}));
-                setAnswer((err as { error?: string }).error ?? "AI assistant unavailable — check GEMINI_API_KEY.");
+            const data = await res.json();
+            if (!res.ok) {
+                const msg = (data as { error?: string }).error ?? "AI assistant error";
+                const is429 = msg.includes("429");
+                setErrorMsg(is429
+                    ? "Gemini is rate-limited — wait a few seconds and try again."
+                    : msg);
+                return;
             }
+            setResult({
+                answerMarkdown: data.answerMarkdown ?? null,
+                summaryError: data.summaryError ?? null,
+                usedFallbackPlan: data.usedFallbackPlan ?? false,
+                citations: data.citations ?? [],
+                results: data.results ?? [],
+            });
         } catch {
-            setAnswer("Connection error. Is the dev server running?");
+            setErrorMsg("Connection error — is the dev server running?");
         } finally {
             setLoading(false);
         }
     };
 
     const SUGGESTIONS = [
-        "Show recent high-variance jobs",
-        "Which RFQs need clarification?",
-        "What's the avg quote for aluminum parts?",
+        "Show all RFQs in the pipeline",
+        "Which RFQs have a quote ready?",
+        "List sent quotes",
+        "What's quoted for aluminum parts?",
     ];
+
+    const hasResults = (result?.results?.length ?? 0) > 0;
+    const is429Summary = result?.summaryError?.includes("429");
 
     return (
         <div className="flex h-full flex-col">
             <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-                <Sparkles className="h-4 w-4 text-muted-foreground" />
+                <Sparkles className="h-4 w-4 text-violet-500" />
                 <span className="text-sm font-semibold">Ask ForgeSight</span>
+                <Badge variant="outline" className="ml-auto text-[9px] border-violet-200 text-violet-600 dark:border-violet-900/50 dark:text-violet-400">
+                    Gemini
+                </Badge>
             </div>
-            <div className="flex-1 overflow-y-auto px-4 py-3">
-                {!answer && !loading && (
-                    <div className="space-y-2">
-                        <p className="text-xs text-muted-foreground">Try asking:</p>
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+                {/* Suggestions */}
+                {!result && !errorMsg && !loading && (
+                    <div className="space-y-1.5">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">Try asking</p>
                         {SUGGESTIONS.map((s) => (
                             <button
                                 key={s}
-                                onClick={() => setQuery(s)}
+                                onClick={() => handleAsk(s)}
                                 className="w-full rounded-lg border border-border px-3 py-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                             >
                                 {s}
@@ -253,17 +279,94 @@ function AskPanel() {
                         ))}
                     </div>
                 )}
+
+                {/* Loading */}
                 {loading && (
                     <div className="space-y-2">
-                        <Skeleton className="h-4 w-full" />
-                        <Skeleton className="h-4 w-3/4" />
-                        <Skeleton className="h-4 w-5/6" />
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            Gemini is thinking…
+                        </div>
+                        <Skeleton className="h-3 w-full" />
+                        <Skeleton className="h-3 w-4/5" />
+                        <Skeleton className="h-3 w-3/4" />
                     </div>
                 )}
-                {answer && (
-                    <div className="rounded-lg bg-muted/50 p-3 text-sm leading-relaxed">
-                        {answer}
+
+                {/* Error */}
+                {errorMsg && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50/50 dark:border-amber-900/30 dark:bg-amber-950/20 p-3">
+                        <p className="text-xs text-amber-700 dark:text-amber-400">{errorMsg}</p>
+                        <button onClick={() => { setErrorMsg(null); setResult(null); }} className="mt-2 text-[11px] text-muted-foreground hover:text-foreground underline">
+                            Clear
+                        </button>
                     </div>
+                )}
+
+                {/* AI answer */}
+                {result?.answerMarkdown && (
+                    <div className={cn(
+                        "rounded-lg border p-3",
+                        result.usedFallbackPlan
+                            ? "border-border bg-muted/40"
+                            : "border-violet-200/60 bg-violet-50/40 dark:border-violet-900/30 dark:bg-violet-950/10"
+                    )}>
+                        <div className="mb-1.5 flex items-center gap-1.5">
+                            <Sparkles className={cn("h-3 w-3", result.usedFallbackPlan ? "text-muted-foreground" : "text-violet-500")} />
+                            <span className={cn("text-[10px] font-semibold uppercase tracking-wider", result.usedFallbackPlan ? "text-muted-foreground" : "text-violet-600 dark:text-violet-400")}>
+                                {result.usedFallbackPlan ? "Search Results" : "Gemini Answer"}
+                            </span>
+                        </div>
+                        <p className="text-xs leading-relaxed text-foreground whitespace-pre-wrap">
+                            {result.answerMarkdown}
+                        </p>
+                    </div>
+                )}
+
+                {/* Rate-limit fallback: show raw results */}
+                {result && !result.answerMarkdown && is429Summary && hasResults && (
+                    <div className="rounded-lg border border-amber-200/60 bg-amber-50/30 dark:border-amber-900/30 p-2">
+                        <p className="mb-1.5 text-[10px] text-amber-600 dark:text-amber-400">Summarizer rate-limited — showing raw results:</p>
+                    </div>
+                )}
+
+                {/* Result rows (always shown when present) */}
+                {hasResults && (
+                    <div className="space-y-1">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                            {result!.results.length} result{result!.results.length !== 1 ? "s" : ""}
+                        </p>
+                        {result!.results.slice(0, 5).map((r) => (
+                            <Link
+                                key={r.id}
+                                href={`/rfqs/${r.id}`}
+                                className="flex flex-col gap-0.5 rounded-md border border-border px-2.5 py-2 hover:bg-accent transition-colors"
+                            >
+                                <p className="truncate text-xs font-medium">{r.customerName}</p>
+                                <p className="truncate text-[10px] text-muted-foreground">{r.subject}</p>
+                                <div className="flex items-center gap-2">
+                                    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-mono font-semibold text-muted-foreground">{r.status}</span>
+                                    {r.totalQuoted != null && (
+                                        <span className="text-[10px] font-mono font-semibold">
+                                            ${r.totalQuoted.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                                        </span>
+                                    )}
+                                </div>
+                            </Link>
+                        ))}
+                    </div>
+                )}
+
+                {/* No results */}
+                {result && !hasResults && !result.answerMarkdown && !is429Summary && (
+                    <p className="text-xs text-muted-foreground">No matching RFQs found.</p>
+                )}
+
+                {/* Reset link */}
+                {(result || errorMsg) && (
+                    <button onClick={() => { setResult(null); setErrorMsg(null); setQuery(""); }} className="text-[11px] text-muted-foreground/60 hover:text-muted-foreground underline">
+                        Ask another question
+                    </button>
                 )}
             </div>
             <div className="border-t border-border p-3">
@@ -275,8 +378,8 @@ function AskPanel() {
                         onKeyDown={(e) => e.key === "Enter" && handleAsk()}
                         className="text-xs"
                     />
-                    <Button size="sm" onClick={handleAsk} disabled={!query.trim() || loading}>
-                        <Zap className="h-3.5 w-3.5" />
+                    <Button size="sm" onClick={() => handleAsk()} disabled={!query.trim() || loading}>
+                        {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
                     </Button>
                 </div>
             </div>

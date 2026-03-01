@@ -34,6 +34,19 @@ Available intents:
 - variance_report: search RFQs that have actuals (set hasActuals:true) to analyze cost variances
 - analytics: aggregate data by groupBy with metrics
 
+Valid RFQ status values (use EXACT strings, no other values):
+  NEW             - just created, not yet extracted
+  EXTRACTED       - AI has extracted fields, awaiting review
+  NEEDS_REVIEW    - flagged for human review
+  READY_TO_SEND   - quote ready to send
+  SENT            - quote has been sent to customer
+
+Common mappings:
+  "needs review" / "inbox" / "unreviewed" → do NOT filter by status (return all)
+  "ready to quote" / "quoted" → status: READY_TO_SEND
+  "sent" / "completed" → status: SENT
+  If unsure about status, omit the status filter and search broadly.
+
 Dates in filters must be ISO 8601 strings (e.g. "2026-01-01").
 Limit defaults to 20 if not specified; max 50.`,
     user: question,

@@ -12,6 +12,7 @@ import {
     Sparkles,
     Github,
     HelpCircle,
+    ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -37,17 +38,16 @@ const PIPELINE_ITEMS = [
 
 const ANALYTICS_ITEMS = [
     {
+        href: "/audit",
+        label: "Audit Log",
+        icon: ClipboardList,
+        description: "All pipeline events",
+    },
+    {
         href: "#",
         label: "Variance",
         icon: BarChart3,
         description: "Actuals vs quoted",
-        disabled: true,
-    },
-    {
-        href: "#",
-        label: "Reports",
-        icon: Factory,
-        description: "Shop performance",
         disabled: true,
     },
 ];
@@ -168,10 +168,10 @@ export function Sidebar() {
             {/* ── Footer ── */}
             <div className="space-y-1 border-t border-border px-3 py-3">
                 <NavItem
-                    href="#"
+                    href="/settings"
                     label="Settings"
                     icon={Settings}
-                    disabled
+                    active={pathname === "/settings"}
                 />
                 <NavItem
                     href="#"
@@ -180,7 +180,7 @@ export function Sidebar() {
                     disabled
                 />
                 <Link
-                    href="https://github.com/lntegrals/forgesight"
+                    href="https://github.com/lntegrals/forgesightai"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-3 rounded-lg px-3 py-2 text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors"
@@ -189,12 +189,13 @@ export function Sidebar() {
                     <span>View on GitHub</span>
                 </Link>
                 <div className="px-3 pb-1 pt-2">
-                    <div className="rounded-lg bg-accent/50 px-3 py-2">
-                        <p className="text-[10px] font-medium text-muted-foreground">
-                            Demo Mode
+                    <div className="rounded-lg bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-900/40 px-3 py-2">
+                        <p className="flex items-center gap-1.5 text-[10px] font-semibold text-violet-700 dark:text-violet-400">
+                            <Sparkles className="h-2.5 w-2.5" />
+                            Gemini 2.5 Flash Active
                         </p>
-                        <p className="text-[10px] text-muted-foreground/60">
-                            Add GEMINI_API_KEY for AI
+                        <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                            AI extraction &amp; clarifier live
                         </p>
                     </div>
                 </div>
