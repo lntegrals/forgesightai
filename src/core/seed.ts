@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
-import { AuditAction, Actor, RFQStatus, type RFQ, type AuditEvent, type ExtractedField } from "./types";
+import { AuditAction, Actor, RFQStatus, DEFAULT_SHOP_CONFIG, type RFQ, type AuditEvent, type ExtractedField } from "./types";
+import { computeQuote } from "./pricing";
 
 // ── Seed RFQ definitions ───────────────────────────────────────────────────
 
@@ -216,13 +217,25 @@ export interface SeedRFQ {
 }
 
 export function getSeedRFQs(): RFQ[] {
-    const seeds: SeedRFQ[] = [
+    // Pre-compute quotes for RFQ 1 + 2 so Ask ForgeSight has real pricing data out-of-the-box
+    const rfq1Quote = computeQuote(
+        { quantity: 250, materialCostPerUnit: 6, materialQty: 1.3, setupHours: 8, laborHours: 37.5, machineHours: 75 },
+        DEFAULT_SHOP_CONFIG
+    );
+    const rfq2Quote = computeQuote(
+        { quantity: 75, materialCostPerUnit: 25, materialQty: 1.3, setupHours: 5, laborHours: 22.5, machineHours: 56.3 },
+        DEFAULT_SHOP_CONFIG
+    );
+
+    const seeds: (SeedRFQ & { quote: ReturnType<typeof computeQuote> | null; status: RFQStatus })[] = [
         {
             id: uuidv4(),
             customerName: "Reynolds Manufacturing",
             subject: "CNC Bracket — Qty 250",
             rawText: rfq1RawText,
             extractedFields: rfq1Fields,
+            quote: rfq1Quote,
+            status: RFQStatus.READY_TO_SEND,
         },
         {
             id: uuidv4(),
@@ -230,6 +243,8 @@ export function getSeedRFQs(): RFQ[] {
             subject: "Hydraulic Manifold Assembly — Multi-part",
             rawText: rfq2RawText,
             extractedFields: rfq2Fields,
+            quote: rfq2Quote,
+            status: RFQStatus.READY_TO_SEND,
         },
         {
             id: uuidv4(),
@@ -237,6 +252,8 @@ export function getSeedRFQs(): RFQ[] {
             subject: "Aerospace Bracket — Tight Tolerance Ti-6Al-4V",
             rawText: rfq3RawText,
             extractedFields: rfq3Fields,
+            quote: null,
+            status: RFQStatus.NEEDS_REVIEW,
         },
         {
             id: uuidv4(),
@@ -244,6 +261,8 @@ export function getSeedRFQs(): RFQ[] {
             subject: "Implant-Grade Ti Bone Anchor Housing — NMD-HA-991",
             rawText: rfq4RawText,
             extractedFields: rfq4Fields,
+            quote: null,
+            status: RFQStatus.NEEDS_REVIEW,
         },
     ];
 
@@ -252,13 +271,14 @@ export function getSeedRFQs(): RFQ[] {
         createdAt: now(),
         customerName: s.customerName,
         subject: s.subject,
-        status: RFQStatus.NEEDS_REVIEW,
+        status: s.status,
         rawText: s.rawText,
         extractedFields: s.extractedFields,
-        quote: null,
+        quote: s.quote,
         audit: [
             auditCreated(),
             { at: now(), actor: Actor.SYSTEM, action: AuditAction.FIELDS_EXTRACTED, detail: `Extracted ${s.extractedFields.length} fields from RFQ text` },
+            ...(s.quote ? [{ at: now(), actor: Actor.SYSTEM, action: AuditAction.QUOTE_GENERATED, detail: `Quote $${s.quote.totals.total.toFixed(2)} pre-computed from seed data` }] : []),
         ],
     }));
 }

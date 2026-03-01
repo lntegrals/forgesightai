@@ -4,7 +4,7 @@
  *
  * Env vars:
  *   GEMINI_API_KEY     — required; if absent all calls return ok:false
- *   GEMINI_MODEL       — default "gemini-2.5-flash"
+ *   GEMINI_MODEL       — default "gemini-2.0-flash"
  *   GEMINI_TIMEOUT_MS  — default 12000
  */
 
@@ -27,7 +27,7 @@ export async function geminiGenerateJSON<T>(args: {
     return { ok: false, error: "GEMINI_API_KEY not set", model: args.model };
   }
 
-  const model = args.model ?? process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+  const model = args.model ?? process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
   const timeoutMs = args.timeoutMs ?? (Number(process.env.GEMINI_TIMEOUT_MS) || 12000);
   const retries = args.retries ?? 1;
 
