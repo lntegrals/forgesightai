@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -297,6 +297,28 @@ export default function RfqsPage() {
     const [search, setSearch] = useState("");
     const [rfqs, setRfqs] = useState<MockRFQ[]>(MOCK_RFQS);
     const [loadingDemo, setLoadingDemo] = useState(false);
+
+    // Auto-load from live API on mount
+    useEffect(() => {
+        fetch("/api/rfqs")
+            .then(r => r.ok ? r.json() : null)
+            .then((data) => {
+                if (Array.isArray(data) && data.length > 0) {
+                    const mapped: MockRFQ[] = data.map((r: { id: string; customerName: string; subject: string; status: string; rawText?: string; extractedFields?: Array<{ confidence: number }> }) => ({
+                        id: r.id,
+                        customerName: r.customerName,
+                        subject: r.subject,
+                        status: mapApiStatus(r.status),
+                        risk: computeRisk(r.extractedFields ?? []),
+                        updatedAt: "Just now",
+                        confidence: avgConfidence(r.extractedFields ?? []),
+                        rawText: r.rawText ?? "",
+                    }));
+                    setRfqs(mapped);
+                }
+            })
+            .catch(() => { /* keep mock data */ });
+    }, []);
 
     const filtered = useMemo(() => {
         const statuses = TAB_FILTERS[tab] ?? [];

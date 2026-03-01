@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, use } from "react";
+import { useState, useCallback, useEffect, use } from "react";
 import Link from "next/link";
 import {
     ArrowLeft,
@@ -38,6 +38,7 @@ import {
     DEMO_CLARIFIER,
     DEMO_QUOTE,
     MOCK_RFQS,
+    type MockRFQ,
 } from "@/lib/mock-rfqs";
 import { toast } from "sonner";
 
@@ -735,8 +736,28 @@ function SimilarJobsPanel() {
 export default function RfqDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
 
-    // Find RFQ from mock data (Phase 2: replace with API call)
-    const rfq = MOCK_RFQS.find(r => r.id === id) ?? DEMO_RFQ;
+    // Try to load from live API, fall back to mock data
+    const [rfq, setRfq] = useState<MockRFQ>(MOCK_RFQS.find(r => r.id === id) ?? DEMO_RFQ);
+
+    useEffect(() => {
+        fetch(`/api/rfqs/${id}`)
+            .then(r => r.ok ? r.json() : null)
+            .then((data) => {
+                if (data) {
+                    setRfq({
+                        id: data.id,
+                        customerName: data.customerName,
+                        subject: data.subject,
+                        status: "needs_review" as const,
+                        risk: "MEDIUM" as const,
+                        updatedAt: "Just now",
+                        confidence: 0.75,
+                        rawText: data.rawText ?? "",
+                    });
+                }
+            })
+            .catch(() => { /* keep mock */ });
+    }, [id]);
 
     const [activeStep, setActiveStep] = useState(1);
     const [stepStates, setStepStates] = useState<StepState[]>([
