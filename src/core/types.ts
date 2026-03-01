@@ -40,7 +40,7 @@ export enum ExtractorMode {
   LLM = "LLM",
 }
 
-export type ExtractionEngine = "gemini" | "mock";
+export type ExtractionEngine = "gemini" | "mock" | "rules";
 
 export interface ExtractionMeta {
   engine: ExtractionEngine;
