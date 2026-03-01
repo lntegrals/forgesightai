@@ -843,6 +843,9 @@ function DeliverStep({ rfq }: { rfq: LiveRFQ }) {
     const quote = rfq.quote ?? DEMO_QUOTE;
     const total = quote.totals.total;
     const [pdfLoading, setPdfLoading] = useState(false);
+    const [sendLoading, setSendLoading] = useState(false);
+    const [sent, setSent] = useState(rfq.status === "SENT");
+    const [emailTo, setEmailTo] = useState("");
     const [emailCopied, setEmailCopied] = useState(false);
     const [emailDraft, setEmailDraft] = useState(
         `Dear ${rfq.customerName.split(" ")[0]},
@@ -861,6 +864,32 @@ Best regards,
 [Your Name]
 ForgeSight Manufacturing`
     );
+
+    const handleSend = async () => {
+        setSendLoading(true);
+        try {
+            const res = await fetch(`/api/rfqs/${rfq.id}/send`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    to: emailTo.trim() || "(no address)",
+                    subject: `Quote — ${rfq.subject}`,
+                    body: emailDraft,
+                }),
+            });
+            if (res.ok) {
+                setSent(true);
+                toast.success("Quote marked as sent — audit log updated");
+            } else {
+                const err = await res.json().catch(() => ({}));
+                toast.error((err as { error?: string }).error ?? "Send failed");
+            }
+        } catch {
+            toast.error("Network error");
+        } finally {
+            setSendLoading(false);
+        }
+    };
 
     const handleDownloadPdf = async () => {
         setPdfLoading(true);
@@ -923,29 +952,53 @@ ForgeSight Manufacturing`
 
             <Separator />
 
-            <div>
-                <div className="mb-2 flex items-center justify-between">
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        Email Draft
-                    </Label>
-                    <Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-xs" onClick={copyEmail}>
-                        <Copy className="h-3 w-3" />
-                        {emailCopied ? "Copied!" : "Copy"}
-                    </Button>
+            {sent ? (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 dark:border-emerald-900/30 dark:bg-emerald-950/20 p-4 text-center">
+                    <CheckCircle2 className="mx-auto mb-2 h-6 w-6 text-emerald-600" />
+                    <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">Quote sent</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">Status updated to SENT · Audit log recorded</p>
                 </div>
-                <Textarea
-                    value={emailDraft}
-                    onChange={(e) => setEmailDraft(e.target.value)}
-                    rows={12}
-                    className="resize-none font-mono text-xs"
-                />
-            </div>
+            ) : (
+                <>
+                    <div>
+                        <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                            To (email address)
+                        </Label>
+                        <Input
+                            className="mt-1 text-sm"
+                            placeholder="customer@example.com"
+                            value={emailTo}
+                            onChange={(e) => setEmailTo(e.target.value)}
+                        />
+                    </div>
 
-            <Button className="w-full gap-2" disabled>
-                <Send className="h-4 w-4" />
-                Send via Email
-                <Badge variant="secondary" className="ml-auto text-[9px]">Coming soon</Badge>
-            </Button>
+                    <div>
+                        <div className="mb-2 flex items-center justify-between">
+                            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                Email Draft
+                            </Label>
+                            <Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-xs" onClick={copyEmail}>
+                                <Copy className="h-3 w-3" />
+                                {emailCopied ? "Copied!" : "Copy"}
+                            </Button>
+                        </div>
+                        <Textarea
+                            value={emailDraft}
+                            onChange={(e) => setEmailDraft(e.target.value)}
+                            rows={10}
+                            className="resize-none font-mono text-xs"
+                        />
+                    </div>
+
+                    <Button className="w-full gap-2" onClick={handleSend} disabled={sendLoading}>
+                        {sendLoading ? (
+                            <><Loader2 className="h-4 w-4 animate-spin" /> Sending…</>
+                        ) : (
+                            <><Send className="h-4 w-4" /> Mark as Sent</>
+                        )}
+                    </Button>
+                </>
+            )}
         </div>
     );
 }

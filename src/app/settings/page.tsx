@@ -92,6 +92,7 @@ export default function SettingsPage() {
   };
 
   return (
+    <div className="h-full overflow-y-auto">
     <div className="p-6 lg:p-8 max-w-2xl">
       {/* Header */}
       <div className="mb-8 flex items-center gap-3">
@@ -154,6 +155,7 @@ export default function SettingsPage() {
           </div>
         </>
       )}
+    </div>
     </div>
   );
 }

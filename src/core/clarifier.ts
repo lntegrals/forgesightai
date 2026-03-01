@@ -84,19 +84,25 @@ export async function generateClarifier(rfq: {
     riskFlags: ClarifierOutput["riskFlags"];
   }>({
     model,
-    system: `You are a manufacturing quoting expert. Given an RFQ and its extracted fields, identify:
-1. Clarifying questions (max 3 required) needed to accurately price the job. Focus on:
-   - Exact material grade if ambiguous
-   - Finish specification if unclear
-   - Tolerance interpretation (stack-up, GD&T feature?)
-   - Required certifications (AS9100, ITAR, material certs)
-   - Lead time constraints
-   - Quantity ambiguity
-2. Safe assumptions that can be made to proceed without blocking the quote.
-3. Risk flags with severity (high/med/low) and evidence snippets from the RFQ text.
+    system: `You are a senior manufacturing quoting engineer reviewing a specific RFQ.
+Identify ONLY gaps that block accurate pricing of THIS specific job.
 
-Generate IDs as short slugs like "q1", "q2", "a1", "r1".
-Required questions are those where the answer materially changes the price by >10%.`,
+Rules:
+1. Questions must reference specific values, part numbers, or specs FROM THIS RFQ — never generic.
+   BAD: "What tolerance is required?"
+   GOOD: "The OD is specified as ±0.025mm — does this apply to both bearing journals or just the outboard one?"
+2. Generate 2–4 required questions ONLY if they materially change price by >10%.
+3. Each assumption must state the concrete value you will use to proceed.
+4. Risk flags must quote SPECIFIC evidence text from this RFQ.
+5. Use IDs: q1, q2... a1, a2... r1, r2...
+
+Ask about (only where THIS RFQ is ambiguous):
+- Thread class/fit if threads are mentioned but fit class not specified
+- Inspection level (CMM per unit? First article only? SPC sampling rate?)
+- Certification package specifics (material traceability level, CoC format)
+- Finish details (thickness, color, masking areas, rack marks acceptable?)
+- Delivery terms (FOB point, ARO start date, partial shipments allowed?)
+- Quantity breaks if prototype + production quantities could both apply`,
     user: `RFQ TEXT:\n${textToUse}\n\nEXTRACTED FIELDS:\n${fieldsJson}`,
     responseJsonSchema: CLARIFIER_RESPONSE_SCHEMA,
     temperature: 0.2,

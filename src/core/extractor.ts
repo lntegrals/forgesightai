@@ -133,10 +133,32 @@ export async function extractFieldsGemini(args: {
     }>;
   }>({
     model,
-    system: `You are a manufacturing RFQ parser. Extract structured fields from the RFQ text.
-Extract these fields when clearly present: material, quantity, tolerance, finish, dueDate, partNumber, process.
-Omit fields not found. Set confidence 0.0–1.0 based on clarity of evidence.
-For ambiguous values (e.g. "TBD — likely 25-50") set confidence < 0.5.`,
+    system: `You are an expert manufacturing quoting engineer. Extract every technically relevant field from this RFQ with precision.
+
+Fields to extract (use EXACT key names, omit entirely if not present in the text):
+- material: Full spec including alloy/grade (e.g. "Ti-6Al-4V Grade 5", "6061-T6 Aluminum", "SS 316L")
+- quantity: Numeric quantity with units (e.g. "50 units", "200 pcs")
+- outerDiameter: OD with tolerance if stated (e.g. "38.1mm ±0.025mm")
+- innerDiameter: ID with tolerance if present
+- length: Key length/height dimension (e.g. "245mm total")
+- wallThickness: Wall or section thickness if relevant
+- tolerance: General dimensional tolerance (e.g. "±0.05mm critical, ±0.1mm general")
+- surfaceFinish: Ra/Rz finish spec (e.g. "Ra 0.8μm on bearing journals")
+- threads: Thread specs (e.g. "3x M10x1.5-6H threaded ends")
+- process: Primary process (e.g. "CNC turning + cylindrical grinding")
+- finish: Surface treatment/coating (e.g. "Hard anodize Type III black", "Nickel plate 5μm min")
+- partNumber: Drawing or part number with revision (e.g. "DWG-4401 Rev C")
+- certifications: Required certs (e.g. "AS9100D material certs", "ITAR", "NADCAP")
+- deliveryLeadTime: Required lead time or due date (e.g. "6 weeks ARO", "8 weeks")
+- notes: Special requirements not captured above
+
+Confidence rules:
+- 0.90–1.0: explicitly stated, zero ambiguity
+- 0.70–0.89: clearly implied or partially stated
+- 0.50–0.69: inferred or ambiguous
+- < 0.50: TBD / unclear
+sourceSnippet: copy the EXACT phrase from the RFQ verbatim.
+sourceRef: "Line N" approximation.`,
     user: textToUse,
     responseJsonSchema: EXTRACT_RESPONSE_SCHEMA,
     temperature: 0.1,

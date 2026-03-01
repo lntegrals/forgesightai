@@ -83,6 +83,7 @@ export default function AuditPage() {
   });
 
   return (
+    <div className="h-full overflow-y-auto">
     <div className="p-6 lg:p-8">
       {/* Header */}
       <div className="mb-6 flex items-center gap-3">
@@ -152,7 +153,7 @@ export default function AuditPage() {
                   </td>
                   <td className="px-4 py-3">
                     <a
-                      href={`/rfq/${row.rfqId}`}
+                      href={`/rfqs/${row.rfqId}`}
                       className="group"
                     >
                       <div className="font-medium text-foreground group-hover:text-primary transition-colors truncate max-w-[190px]">
@@ -172,6 +173,7 @@ export default function AuditPage() {
           </table>
         </div>
       )}
+    </div>
     </div>
   );
 }
