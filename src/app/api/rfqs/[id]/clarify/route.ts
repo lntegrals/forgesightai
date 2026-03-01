@@ -35,7 +35,11 @@ export async function POST(
   });
 
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: 500 });
+    const is429 = result.error.includes("429");
+    return NextResponse.json(
+      { error: is429 ? "Gemini rate limited — wait ~60 seconds and try again" : result.error },
+      { status: is429 ? 429 : 500 }
+    );
   }
 
   updateRfq(id, { clarifier: result.clarifier });

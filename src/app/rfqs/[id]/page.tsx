@@ -476,6 +476,8 @@ function ClarifyStep({
                 const updated: LiveRFQ = await res.json();
                 toast.success("AI questions generated");
                 onRfqUpdate?.(updated);
+            } else if (res.status === 429) {
+                toast.error("Gemini rate limited — wait ~60 seconds and try again");
             } else {
                 const err = await res.json().catch(() => ({}));
                 toast.error((err as { error?: string }).error ?? "Failed to generate questions");

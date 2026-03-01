@@ -41,11 +41,16 @@ Valid RFQ status values (use EXACT strings, no other values):
   READY_TO_SEND   - quote ready to send
   SENT            - quote has been sent to customer
 
-Common mappings:
-  "needs review" / "inbox" / "unreviewed" → do NOT filter by status (return all)
-  "ready to quote" / "quoted" → status: READY_TO_SEND
-  "sent" / "completed" → status: SENT
-  If unsure about status, omit the status filter and search broadly.
+CRITICAL — status filter rules:
+  "needs review" / "inbox" / "unreviewed" → OMIT status filter entirely (return all)
+  "ready to quote" / "quoted" / "has a quote" → status: READY_TO_SEND
+  "sent" / "delivered" / "completed" → status: SENT
+  "pipeline" / "all" / "show me" / "list" / general questions → OMIT status filter
+  If ANY doubt about status, OMIT the status filter — the fallback will broaden automatically.
+
+For general questions like "show all RFQs", "what's in the pipeline", "total value" → use intent: search_rfqs with NO filters.
+For material questions like "titanium jobs" → use filters.q: "titanium" with NO status filter.
+For customer questions → use filters.q: "<customer name>" with NO status filter.
 
 Dates in filters must be ISO 8601 strings (e.g. "2026-01-01").
 Limit defaults to 20 if not specified; max 50.`,
@@ -156,25 +161,28 @@ export async function summarize(
   const result = await geminiGenerateJSON<{ answerMarkdown: string }>({
     model,
     system: `You are ForgeSight AI, the intelligent assistant for a precision CNC manufacturing quoting shop.
-Answer questions about RFQs, customers, materials, tolerances, quotes, and production data using ONLY the RESULTS JSON.
+Answer questions about RFQs using ONLY the RESULTS JSON provided. Never invent data.
 
 Data structure per result:
 - Top-level: id, customerName, subject, status, material, qty, totalQuoted, hasQuote
 - \`fields\` object: all AI-extracted values — material, quantity, partNumber, tolerance, surfaceFinish, threads, finish, certifications, deliveryLeadTime, process, notes, etc.
-- \`rawSnippet\`: first 400 chars of the original RFQ email/document
+- \`quote\` object (if present): totals.total, totals.materialCost, totals.laborCost, totals.machineCost, totals.margin, inputs.setupHours, inputs.laborHours, inputs.machineHours, inputs.materialCostPerUnit, inputs.quantity
+- \`rawSnippet\`: first 800 chars of the original RFQ text
 
 Rules:
 - Use **bold** for customer names, dollar amounts, part numbers, and key specs
 - Use bullet lists when listing multiple RFQs or items
-- Be specific — quote exact values from the data when asked
-- If a field wasn't extracted, say "not specified" rather than guessing
+- Be specific — quote EXACT values from the data (e.g. "$12,450.00", "Ti-6Al-4V Grade 5", "±0.025mm")
+- For financial/quote questions: use quote.totals.* values — these are the authoritative numbers
+- If a field wasn't extracted and isn't in rawSnippet, say "not specified"
+- Do NOT say "based on the data" — just answer directly
 - Keep responses concise and direct`,
     user: `QUESTION: ${question}
 
 RESULTS DATA:
 ${JSON.stringify(results, null, 2)}
 
-Answer specifically using the data above. Reference exact values for specs, quantities, and prices.`,
+Answer the question using exact values from the data above.`,
     responseJsonSchema: {
       type: "object",
       properties: { answerMarkdown: { type: "string" } },

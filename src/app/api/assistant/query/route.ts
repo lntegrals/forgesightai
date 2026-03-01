@@ -36,7 +36,7 @@ function enrichResults(results: unknown): unknown {
     // Strip noisy internal fields before sending to Gemini
     const { searchText: _st, qtyBucket: _qb, toleranceBand: _tb, toleranceAbs: _ta, ...rest } = r;
     void _st; void _qb; void _tb; void _ta;
-    return { ...rest, fields, rawSnippet: full.rawText.slice(0, 400) };
+    return { ...rest, fields, rawSnippet: full.rawText.slice(0, 800), quote: full.quote ?? undefined };
   });
 }
 
@@ -127,19 +127,15 @@ export async function POST(request: NextRequest) {
   // Enrich results with extracted field data + raw text snippet
   const enrichedResults = enrichResults(execResult.results);
 
-  // Step 3: Summarize — fall back to local summary if Gemini unavailable
+  // Step 3: Summarize — always try Gemini; fall back to local summary only on failure
   let answerMarkdown: string | null = null;
   let summaryError: string | null = null;
 
-  if (!usedFallbackPlan) {
-    const sumResult = await summarize(question, enrichedResults, execResult.citations);
-    if (sumResult.ok) {
-      answerMarkdown = sumResult.answerMarkdown;
-    } else {
-      summaryError = sumResult.error;
-      answerMarkdown = buildFallbackSummary(question, execResult.results);
-    }
+  const sumResult = await summarize(question, enrichedResults, execResult.citations);
+  if (sumResult.ok) {
+    answerMarkdown = sumResult.answerMarkdown;
   } else {
+    summaryError = sumResult.error;
     answerMarkdown = buildFallbackSummary(question, execResult.results);
   }
 
