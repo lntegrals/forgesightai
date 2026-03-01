@@ -6,7 +6,6 @@ import {
     ArrowLeft,
     Sparkles,
     CheckCircle2,
-    Circle,
     Loader2,
     AlertTriangle,
     FileText,
@@ -24,7 +23,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
@@ -32,15 +31,25 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import {
-    DEMO_RFQ,
-    DEMO_EXTRACTED_FIELDS,
-    DEMO_CLARIFIER,
-    DEMO_QUOTE,
-    MOCK_RFQS,
-    type MockRFQ,
-} from "@/lib/mock-rfqs";
+import { DEMO_RFQ, DEMO_EXTRACTED_FIELDS, DEMO_CLARIFIER, DEMO_QUOTE } from "@/lib/mock-rfqs";
 import { toast } from "sonner";
+import type { ExtractedField, ClarifierOutput, Quote } from "@/core/types";
+
+// ── Live RFQ shape (what the API returns) ──────────────────────────────────
+
+interface LiveRFQ {
+    id: string;
+    customerName: string;
+    subject: string;
+    status: string;
+    rawText: string;
+    extractedFields: ExtractedField[];
+    clarifier?: ClarifierOutput;
+    clarifierAnswers?: Record<string, string>;
+    confirmedAssumptions?: string[];
+    quote: Quote | null;
+    createdAt: string;
+}
 
 // ── Step Types ──────────────────────────────────────────────────────────────
 
@@ -60,6 +69,19 @@ const STEPS: Step[] = [
     { id: 4, icon: Calculator, label: "Quote Builder", description: "Deterministic pricing" },
     { id: 5, icon: Send, label: "Deliver", description: "PDF + email draft" },
 ];
+
+// Map RFQ API status to step index (0-based)
+function statusToStep(status: string): number {
+    switch (status) {
+        case "NEW": return 0;
+        case "EXTRACTED":
+        case "NEEDS_REVIEW": return 1;
+        case "NEEDS_CLARIFICATION": return 2;
+        case "READY_TO_SEND": return 3;
+        case "SENT": return 4;
+        default: return 0;
+    }
+}
 
 // ── Step Indicator ──────────────────────────────────────────────────────────
 
@@ -81,19 +103,17 @@ function StepIndicator({
             className={cn(
                 "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
                 active ? "bg-accent" : "hover:bg-accent/40",
-                state === "pending" && "opacity-50"
+                state === "pending" && "opacity-40 cursor-default"
             )}
+            disabled={state === "pending"}
         >
-            {/* Circle */}
-            <div
-                className={cn(
-                    "flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold",
-                    state === "complete" && "border-emerald-500 bg-emerald-500 text-white",
-                    state === "active" && "border-foreground bg-foreground text-background",
-                    state === "error" && "border-red-500 bg-red-500 text-white",
-                    state === "pending" && "border-muted-foreground/30 bg-transparent text-muted-foreground"
-                )}
-            >
+            <div className={cn(
+                "flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold",
+                state === "complete" && "border-emerald-500 bg-emerald-500 text-white",
+                state === "active" && "border-foreground bg-foreground text-background",
+                state === "error" && "border-red-500 bg-red-500 text-white",
+                state === "pending" && "border-muted-foreground/30 bg-transparent text-muted-foreground"
+            )}>
                 {state === "complete" ? (
                     <CheckCircle2 className="h-4 w-4" />
                 ) : state === "error" ? (
@@ -102,7 +122,6 @@ function StepIndicator({
                     <Icon className="h-3.5 w-3.5" />
                 )}
             </div>
-            {/* Label */}
             <div className="min-w-0 flex-1">
                 <p className={cn("text-sm font-medium leading-none", active ? "text-foreground" : "text-muted-foreground")}>
                     {step.label}
@@ -120,38 +139,66 @@ function StepIndicator({
 
 function ExtractStep({
     rfqId,
-    rawText,
+    alreadyExtracted,
     onComplete,
 }: {
     rfqId: string;
-    rawText: string;
-    onComplete: () => void;
+    alreadyExtracted: boolean;
+    onComplete: (updatedRfq: LiveRFQ) => void;
 }) {
     const [loading, setLoading] = useState(false);
-    const [done, setDone] = useState(false);
+    const [done, setDone] = useState(alreadyExtracted);
     const [log, setLog] = useState<string[]>([]);
+    const [engine, setEngine] = useState("mock");
 
     const handleExtract = async () => {
         setLoading(true);
         setLog([]);
-        const steps = [
+        setDone(false);
+
+        // Animate log lines while waiting for API
+        const preflight = [
             "Sending RFQ text to Gemini 2.5 Flash…",
             "Parsing structured fields: material, qty, dimensions…",
             "Assigning confidence scores from source citations…",
-            "Extraction complete — 7 fields identified",
         ];
-        for (const s of steps) {
-            await new Promise((r) => setTimeout(r, 600));
-            setLog((prev) => [...prev, s]);
-        }
-        // Try live API, fall back gracefully
+        let logIdx = 0;
+        const ticker = setInterval(() => {
+            if (logIdx < preflight.length) {
+                setLog(prev => [...prev, preflight[logIdx++]]);
+            }
+        }, 500);
+
         try {
-            await fetch(`/api/rfqs/${rfqId}/extract`, { method: "POST" });
-        } catch { /* offline — demo still works */ }
-        setLoading(false);
-        setDone(true);
-        toast.success("Fields extracted");
-        onComplete();
+            const res = await fetch(`/api/rfqs/${rfqId}/extract`, { method: "POST" });
+            clearInterval(ticker);
+
+            if (res.ok) {
+                const updated: LiveRFQ = await res.json();
+                const eng = (updated as unknown as { extractionMeta?: { engine?: string } }).extractionMeta?.engine ?? "mock";
+                setEngine(eng);
+                const fieldCount = updated.extractedFields?.length ?? 0;
+                setLog(prev => [
+                    ...prev,
+                    `Extraction complete — ${fieldCount} field${fieldCount !== 1 ? "s" : ""} identified (${eng})`,
+                ]);
+                setDone(true);
+                setLoading(false);
+                toast.success(`${fieldCount} fields extracted`);
+                onComplete(updated);
+            } else {
+                clearInterval(ticker);
+                const err = await res.json().catch(() => ({}));
+                setLog(prev => [...prev, `Error: ${(err as { error?: string }).error ?? "extraction failed"}`]);
+                toast.error("Extraction failed");
+                setLoading(false);
+            }
+        } catch {
+            clearInterval(ticker);
+            setLog(prev => [...prev, "Network error — falling back to mock extraction"]);
+            setLoading(false);
+            toast.error("Could not reach API");
+        }
     };
 
     if (done) {
@@ -163,7 +210,7 @@ function ExtractStep({
                 <div>
                     <p className="font-semibold">Extraction complete</p>
                     <p className="mt-1 text-sm text-muted-foreground">
-                        7 fields extracted · avg confidence 86%
+                        Engine: <span className="font-mono text-xs">{engine}</span> · Ready to review fields
                     </p>
                 </div>
                 <Button variant="outline" size="sm" onClick={() => { setDone(false); setLog([]); }}>
@@ -183,15 +230,15 @@ function ExtractStep({
                 <ul className="space-y-1.5 text-sm text-muted-foreground">
                     <li className="flex items-start gap-2">
                         <Zap className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-amber-500" />
-                        Gemini 2.5 Flash reads the raw RFQ text
+                        Gemini 2.5 Flash reads the raw RFQ text (falls back to mock if no API key)
                     </li>
                     <li className="flex items-start gap-2">
                         <Zap className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-amber-500" />
-                        Returns structured fields with confidence scores
+                        Returns structured fields with confidence scores + source citations
                     </li>
                     <li className="flex items-start gap-2">
                         <Zap className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-amber-500" />
-                        Cites exact source snippets from the document
+                        Also generates clarifying questions (if Gemini available)
                     </li>
                 </ul>
             </div>
@@ -225,28 +272,66 @@ function ExtractStep({
 
 // ── Step 2: Review Fields ───────────────────────────────────────────────────
 
-function ReviewStep({ onComplete }: { onComplete: () => void }) {
-    const [fields, setFields] = useState(DEMO_EXTRACTED_FIELDS.map(f => ({ ...f })));
-    const allConfirmed = fields.filter(f => f.confidence >= 0.85 || f.isConfirmed).length;
-    const total = fields.length;
+function ReviewStep({
+    rfqId,
+    fields: initialFields,
+    onComplete,
+}: {
+    rfqId: string;
+    fields: ExtractedField[];
+    onComplete: (updated: LiveRFQ) => void;
+}) {
+    const [fields, setFields] = useState<ExtractedField[]>(
+        initialFields.length > 0 ? initialFields : DEMO_EXTRACTED_FIELDS
+    );
+    const [saving, setSaving] = useState(false);
 
-    const confirm = (key: string) => {
+    // Sync if parent updates fields
+    useEffect(() => {
+        if (initialFields.length > 0) setFields(initialFields);
+    }, [initialFields]);
+
+    const confirmField = (key: string) => {
         setFields(fs => fs.map(f => f.key === key ? { ...f, isConfirmed: true } : f));
     };
 
-    const confirmAll = () => {
-        setFields(fs => fs.map(f => ({ ...f, isConfirmed: true })));
-        setTimeout(() => { onComplete(); }, 300);
+    const saveConfirmations = async (confirmedFields: ExtractedField[]) => {
+        setSaving(true);
+        try {
+            const res = await fetch(`/api/rfqs/${rfqId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ extractedFields: confirmedFields }),
+            });
+            if (res.ok) {
+                const updated: LiveRFQ = await res.json();
+                return updated;
+            }
+        } catch { /* network error */ } finally {
+            setSaving(false);
+        }
+        return null;
+    };
+
+    const confirmAll = async () => {
+        const confirmed = fields.map(f => ({ ...f, isConfirmed: true }));
+        setFields(confirmed);
+        const updated = await saveConfirmations(confirmed);
+        if (updated) {
+            toast.success("All fields confirmed");
+            onComplete(updated);
+        } else {
+            toast.error("Failed to save confirmations — check server");
+        }
     };
 
     const lowConf = fields.filter(f => f.confidence < 0.85 && !f.isConfirmed);
 
     return (
         <div className="space-y-3">
-            {/* Summary bar */}
             <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">
-                    {fields.filter(f => f.isConfirmed).length} / {total} confirmed
+                    {fields.filter(f => f.isConfirmed).length} / {fields.length} confirmed
                 </span>
                 {lowConf.length > 0 && (
                     <Badge variant="outline" className="gap-1 text-amber-600 border-amber-200 text-[10px]">
@@ -256,7 +341,6 @@ function ReviewStep({ onComplete }: { onComplete: () => void }) {
                 )}
             </div>
 
-            {/* Fields list */}
             <div className="space-y-2">
                 {fields.map((field) => {
                     const pct = Math.round(field.confidence * 100);
@@ -266,9 +350,11 @@ function ReviewStep({ onComplete }: { onComplete: () => void }) {
                             key={field.key}
                             className={cn(
                                 "rounded-lg border p-3 transition-colors",
-                                field.isConfirmed ? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-900/30 dark:bg-emerald-950/10" :
-                                    needsReview ? "border-amber-200 bg-amber-50/30 dark:border-amber-900/30 dark:bg-amber-950/10" :
-                                        "border-border"
+                                field.isConfirmed
+                                    ? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-900/30 dark:bg-emerald-950/10"
+                                    : needsReview
+                                        ? "border-amber-200 bg-amber-50/30 dark:border-amber-900/30 dark:bg-amber-950/10"
+                                        : "border-border"
                             )}
                         >
                             <div className="flex items-start justify-between gap-3">
@@ -287,11 +373,15 @@ function ReviewStep({ onComplete }: { onComplete: () => void }) {
                                             <span className="text-[10px] tabular-nums text-muted-foreground">{pct}%</span>
                                         </div>
                                     </div>
-                                    <p className="text-sm font-medium">{field.value}</p>
-                                    <p className="mt-0.5 text-[10px] text-muted-foreground/70">
-                                        <span className="text-muted-foreground/50">{field.sourceRef}</span>
-                                        {" — "}&ldquo;{field.sourceSnippet}&rdquo;
+                                    <p className="text-sm font-medium">
+                                        {field.userOverrideValue ?? field.value}
                                     </p>
+                                    {field.sourceSnippet && (
+                                        <p className="mt-0.5 text-[10px] text-muted-foreground/70 truncate">
+                                            <span className="text-muted-foreground/50">{field.sourceRef}</span>
+                                            {" — "}&ldquo;{field.sourceSnippet}&rdquo;
+                                        </p>
+                                    )}
                                 </div>
                                 {field.isConfirmed ? (
                                     <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-600 whitespace-nowrap">
@@ -303,7 +393,7 @@ function ReviewStep({ onComplete }: { onComplete: () => void }) {
                                         size="sm"
                                         variant={needsReview ? "default" : "outline"}
                                         className="h-7 text-xs gap-1 flex-shrink-0"
-                                        onClick={() => confirm(field.key)}
+                                        onClick={() => confirmField(field.key)}
                                     >
                                         <CheckCircle2 className="h-3 w-3" />
                                         Confirm
@@ -316,9 +406,12 @@ function ReviewStep({ onComplete }: { onComplete: () => void }) {
             </div>
 
             <Separator />
-            <Button onClick={confirmAll} className="w-full gap-2">
-                <CheckCircle2 className="h-4 w-4" />
-                Confirm All & Continue
+            <Button onClick={confirmAll} disabled={saving} className="w-full gap-2">
+                {saving ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
+                ) : (
+                    <><CheckCircle2 className="h-4 w-4" /> Confirm All & Continue</>
+                )}
             </Button>
         </div>
     );
@@ -326,30 +419,80 @@ function ReviewStep({ onComplete }: { onComplete: () => void }) {
 
 // ── Step 3: Clarify ─────────────────────────────────────────────────────────
 
-function ClarifyStep({ onComplete }: { onComplete: () => void }) {
-    const [clarifier, setClarifier] = useState(DEMO_CLARIFIER);
-    const [assumptionsAccepted, setAssumptionsAccepted] = useState(false);
-    const [loading, setLoading] = useState(false);
+function ClarifyStep({
+    rfqId,
+    clarifier: liveClarifier,
+    savedAnswers,
+    savedAssumptions,
+    onComplete,
+}: {
+    rfqId: string;
+    clarifier?: ClarifierOutput;
+    savedAnswers?: Record<string, string>;
+    savedAssumptions?: string[];
+    onComplete: (updated: LiveRFQ) => void;
+}) {
+    // Use live clarifier if available, otherwise fall back to mock
+    const cl = liveClarifier ?? null;
+    const hasClarifier = !!cl;
 
-    const requiredAnswered = clarifier.questions.filter(
-        q => !q.required || q.answer
-    ).length === clarifier.questions.length;
+    // Map ClarifierOutput to UI shape (or use DEMO_CLARIFIER)
+    const questions = hasClarifier
+        ? cl.questions.map(q => ({
+            id: q.id,
+            text: q.question,
+            required: q.required,
+            answer: savedAnswers?.[q.id] ?? null as string | null,
+        }))
+        : DEMO_CLARIFIER.questions.map(q => ({ ...q, answer: q.answer as string | null }));
 
-    const canProceed = requiredAnswered && assumptionsAccepted;
+    const assumptions = hasClarifier
+        ? cl.assumptions.map(a => ({ id: a.id, text: a.assumption }))
+        : DEMO_CLARIFIER.assumptions.map((a, i) => ({ id: `a${i}`, text: a }));
 
-    const setAnswer = (id: string, answer: string) => {
-        setClarifier(c => ({
-            ...c,
-            questions: c.questions.map(q => q.id === id ? { ...q, answer } : q),
-        }));
-    };
+    const riskFlags = hasClarifier
+        ? cl.riskFlags.map(r => ({ id: r.id, text: r.label, severity: r.severity }))
+        : DEMO_CLARIFIER.riskFlags.map((r, i) => ({ id: `r${i}`, text: r, severity: "high" as const }));
+
+    const [localAnswers, setLocalAnswers] = useState<Record<string, string>>(savedAnswers ?? {});
+    const [confirmedIds, setConfirmedIds] = useState<Set<string>>(new Set(savedAssumptions ?? []));
+    const [allAssumptionsAccepted, setAllAssumptionsAccepted] = useState(
+        assumptions.every(a => (savedAssumptions ?? []).includes(a.id))
+    );
+    const [saving, setSaving] = useState(false);
+
+    const requiredDone = questions.filter(q => q.required).every(
+        q => localAnswers[q.id]?.trim()
+    );
+    const canProceed = requiredDone && allAssumptionsAccepted;
 
     const handleProceed = async () => {
-        setLoading(true);
-        await new Promise(r => setTimeout(r, 600));
-        setLoading(false);
-        onComplete();
-        toast.success("Clarifications saved — quote is unlocked");
+        setSaving(true);
+        try {
+            const assumptionIds = allAssumptionsAccepted
+                ? assumptions.map(a => a.id)
+                : Array.from(confirmedIds);
+
+            const res = await fetch(`/api/rfqs/${rfqId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    clarifierAnswers: localAnswers,
+                    confirmedAssumptions: assumptionIds,
+                }),
+            });
+            if (res.ok) {
+                const updated: LiveRFQ = await res.json();
+                toast.success("Clarifications saved — quote unlocked");
+                onComplete(updated);
+            } else {
+                toast.error("Failed to save clarifications");
+            }
+        } catch {
+            toast.error("Network error");
+        } finally {
+            setSaving(false);
+        }
     };
 
     return (
@@ -357,21 +500,25 @@ function ClarifyStep({ onComplete }: { onComplete: () => void }) {
             {/* Questions */}
             <div>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Questions from AI
-                    <Badge variant="outline" className="ml-2 text-[10px]">Required</Badge>
+                    {hasClarifier ? "Gemini Questions" : "AI Questions (demo)"}
+                    {" "}<Badge variant="outline" className="ml-1 text-[10px]">Required</Badge>
                 </p>
                 <div className="space-y-3">
-                    {clarifier.questions.map((q) => (
-                        <div key={q.id} className={cn(
-                            "rounded-lg border p-3",
-                            q.required && !q.answer ? "border-amber-200 bg-amber-50/30 dark:border-amber-900/30 dark:bg-amber-950/10" : "border-border"
-                        )}>
+                    {questions.map((q) => (
+                        <div
+                            key={q.id}
+                            className={cn(
+                                "rounded-lg border p-3",
+                                q.required && !localAnswers[q.id]
+                                    ? "border-amber-200 bg-amber-50/30 dark:border-amber-900/30 dark:bg-amber-950/10"
+                                    : "border-border"
+                            )}
+                        >
                             <div className="flex items-start gap-2 mb-2">
-                                {q.required ? (
-                                    <HelpCircle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-amber-500" />
-                                ) : (
-                                    <HelpCircle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/50" />
-                                )}
+                                <HelpCircle className={cn(
+                                    "mt-0.5 h-3.5 w-3.5 flex-shrink-0",
+                                    q.required ? "text-amber-500" : "text-muted-foreground/50"
+                                )} />
                                 <p className="text-sm">
                                     {q.text}
                                     {!q.required && (
@@ -381,8 +528,8 @@ function ClarifyStep({ onComplete }: { onComplete: () => void }) {
                             </div>
                             <Input
                                 placeholder="Your answer…"
-                                value={q.answer ?? ""}
-                                onChange={(e) => setAnswer(q.id, e.target.value)}
+                                value={localAnswers[q.id] ?? ""}
+                                onChange={(e) => setLocalAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
                                 className="text-sm"
                             />
                         </div>
@@ -393,31 +540,44 @@ function ClarifyStep({ onComplete }: { onComplete: () => void }) {
             <Separator />
 
             {/* Assumptions */}
-            <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    AI Assumptions
-                </p>
-                <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
-                    {clarifier.assumptions.map((a, i) => (
-                        <div key={i} className="flex items-start gap-2 text-sm">
-                            <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-blue-500" />
-                            <span className="text-muted-foreground">{a}</span>
-                        </div>
-                    ))}
+            {assumptions.length > 0 && (
+                <div>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        Assumptions
+                    </p>
+                    <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+                        {assumptions.map((a) => (
+                            <div key={a.id} className="flex items-start gap-2 text-sm">
+                                <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-blue-500" />
+                                <span className="text-muted-foreground">{a.text}</span>
+                            </div>
+                        ))}
+                    </div>
                 </div>
-            </div>
+            )}
 
             {/* Risk flags */}
-            {clarifier.riskFlags.length > 0 && (
+            {riskFlags.length > 0 && (
                 <div>
                     <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                         Risk Flags
                     </p>
                     <div className="space-y-2">
-                        {clarifier.riskFlags.map((rf, i) => (
-                            <div key={i} className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50/30 p-3 text-sm dark:border-red-900/30 dark:bg-red-950/10">
-                                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-red-500" />
-                                <span className="text-muted-foreground">{rf}</span>
+                        {riskFlags.map((rf) => (
+                            <div
+                                key={rf.id}
+                                className={cn(
+                                    "flex items-start gap-2 rounded-lg border p-3 text-sm",
+                                    rf.severity === "high"
+                                        ? "border-red-200 bg-red-50/30 dark:border-red-900/30 dark:bg-red-950/10"
+                                        : "border-amber-200 bg-amber-50/20 dark:border-amber-900/30"
+                                )}
+                            >
+                                <AlertTriangle className={cn(
+                                    "mt-0.5 h-3.5 w-3.5 flex-shrink-0",
+                                    rf.severity === "high" ? "text-red-500" : "text-amber-500"
+                                )} />
+                                <span className="text-muted-foreground">{rf.text}</span>
                             </div>
                         ))}
                     </div>
@@ -426,34 +586,28 @@ function ClarifyStep({ onComplete }: { onComplete: () => void }) {
 
             <Separator />
 
-            {/* Confirm assumptions */}
             <label className="flex items-center gap-3 cursor-pointer">
                 <input
                     type="checkbox"
-                    checked={assumptionsAccepted}
-                    onChange={e => setAssumptionsAccepted(e.target.checked)}
+                    checked={allAssumptionsAccepted}
+                    onChange={e => setAllAssumptionsAccepted(e.target.checked)}
                     className="h-4 w-4 rounded border-input"
                 />
                 <span className="text-sm text-muted-foreground">
-                    I confirm the assumptions above are acceptable for this quote
+                    I confirm all assumptions above are acceptable for this quote
                 </span>
             </label>
 
-            <Button
-                onClick={handleProceed}
-                disabled={!canProceed || loading}
-                className="w-full gap-2"
-            >
-                {loading ? (
+            <Button onClick={handleProceed} disabled={!canProceed || saving} className="w-full gap-2">
+                {saving ? (
                     <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
                 ) : (
                     <><Calculator className="h-4 w-4" /> Proceed to Quote Builder</>
                 )}
             </Button>
-
             {!canProceed && (
                 <p className="text-center text-xs text-muted-foreground">
-                    {!requiredAnswered
+                    {!requiredDone
                         ? "Answer all required questions to unlock quoting"
                         : "Accept assumptions to continue"}
                 </p>
@@ -464,17 +618,45 @@ function ClarifyStep({ onComplete }: { onComplete: () => void }) {
 
 // ── Step 4: Quote Builder ───────────────────────────────────────────────────
 
-function QuoteStep({ onComplete }: { onComplete: () => void }) {
+function QuoteStep({
+    rfqId,
+    existingQuote,
+    onComplete,
+}: {
+    rfqId: string;
+    existingQuote: Quote | null;
+    onComplete: (updated: LiveRFQ) => void;
+}) {
     const [generating, setGenerating] = useState(false);
-    const [quote, setQuote] = useState<typeof DEMO_QUOTE | null>(null);
+    const [quote, setQuote] = useState<Quote | null>(existingQuote);
+    const [error, setError] = useState<string | null>(null);
 
     const handleGenerate = async () => {
         setGenerating(true);
-        await new Promise(r => setTimeout(r, 1000));
-        setQuote(DEMO_QUOTE);
-        setGenerating(false);
-        toast.success("Quote generated — $" + DEMO_QUOTE.totals.total.toLocaleString());
+        setError(null);
+        try {
+            const res = await fetch(`/api/rfqs/${rfqId}/quote`, { method: "POST" });
+            if (res.ok) {
+                const updated: LiveRFQ = await res.json();
+                setQuote(updated.quote);
+                toast.success(`Quote: $${updated.quote?.totals.total.toLocaleString()}`);
+                onComplete(updated);
+            } else {
+                const err = await res.json().catch(() => ({}));
+                const msg = (err as { error?: string }).error ?? "Quote generation failed";
+                setError(msg);
+                toast.error(msg);
+            }
+        } catch {
+            setError("Network error — check server");
+            toast.error("Network error");
+        } finally {
+            setGenerating(false);
+        }
     };
+
+    const displayQuote = quote ?? DEMO_QUOTE;
+    const isReal = !!quote;
 
     if (!quote) {
         return (
@@ -484,18 +666,17 @@ function QuoteStep({ onComplete }: { onComplete: () => void }) {
                         <Calculator className="h-4 w-4" />
                         Deterministic Pricing Engine
                     </p>
-                    <p>All prices computed from your shop config + extracted fields. Gemini never touches pricing — only humans and the formula engine.</p>
+                    <p>
+                        All prices computed from your shop config + confirmed field values.
+                        Gemini never touches pricing.
+                    </p>
                 </div>
-                <div className="rounded-lg border border-border p-3 space-y-2">
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Shop Config</p>
-                    <div className="grid grid-cols-2 gap-2 text-sm">
-                        <div><span className="text-muted-foreground">Setup rate:</span> $85/hr</div>
-                        <div><span className="text-muted-foreground">Labor rate:</span> $65/hr</div>
-                        <div><span className="text-muted-foreground">Machine rate:</span> $120/hr</div>
-                        <div><span className="text-muted-foreground">Overhead:</span> 15%</div>
-                        <div><span className="text-muted-foreground">Margin:</span> 20%</div>
+                {error && (
+                    <div className="rounded-lg border border-red-200 bg-red-50/30 p-3 text-sm text-red-700 dark:border-red-900/30 dark:bg-red-950/10 dark:text-red-400">
+                        <AlertTriangle className="mb-1 h-4 w-4" />
+                        {error}
                     </div>
-                </div>
+                )}
                 <Button onClick={handleGenerate} disabled={generating} className="w-full gap-2">
                     {generating ? (
                         <><Loader2 className="h-4 w-4 animate-spin" /> Calculating…</>
@@ -509,7 +690,11 @@ function QuoteStep({ onComplete }: { onComplete: () => void }) {
 
     return (
         <div className="space-y-3">
-            {/* Line items */}
+            {!isReal && (
+                <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-200">
+                    Demo data — click Generate to compute real quote
+                </Badge>
+            )}
             <div className="overflow-hidden rounded-lg border border-border">
                 <table className="w-full text-sm">
                     <thead>
@@ -519,7 +704,7 @@ function QuoteStep({ onComplete }: { onComplete: () => void }) {
                         </tr>
                     </thead>
                     <tbody>
-                        {DEMO_QUOTE.lineItems.map((item, i) => (
+                        {displayQuote.lineItems.map((item, i) => (
                             <tr key={i} className="border-b border-border last:border-0">
                                 <td className="px-3 py-2.5">
                                     <p className="font-medium">{item.label}</p>
@@ -533,21 +718,21 @@ function QuoteStep({ onComplete }: { onComplete: () => void }) {
                     </tbody>
                     <tfoot>
                         <tr className="border-t-2 border-foreground/20 bg-muted/30">
-                            <td className="px-3 py-3 font-bold">Total (50 units)</td>
+                            <td className="px-3 py-3 font-bold">Total</td>
                             <td className="px-3 py-3 text-right font-mono text-lg font-bold">
-                                ${DEMO_QUOTE.totals.total.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                                ${displayQuote.totals.total.toLocaleString("en-US", { minimumFractionDigits: 2 })}
                             </td>
                         </tr>
                         <tr>
                             <td colSpan={2} className="px-3 py-1.5 text-xs text-muted-foreground">
-                                Unit price: ${(DEMO_QUOTE.totals.total / 50).toFixed(2)} · Margin: 20%
+                                Margin: {Math.round(displayQuote.totals.marginPct * 100)}%
+                                {" · "}Overhead: {Math.round((displayQuote.totals.overheadAmount / displayQuote.totals.subtotal) * 100)}%
                             </td>
                         </tr>
                     </tfoot>
                 </table>
             </div>
-
-            <Button onClick={onComplete} className="w-full gap-2">
+            <Button onClick={onComplete.bind(null, {} as LiveRFQ)} className="w-full gap-2">
                 <Send className="h-4 w-4" />
                 Proceed to Deliver
             </Button>
@@ -557,46 +742,48 @@ function QuoteStep({ onComplete }: { onComplete: () => void }) {
 
 // ── Step 5: Deliver ─────────────────────────────────────────────────────────
 
-function DeliverStep({ rfqId }: { rfqId: string }) {
-    const [emailDraft, setEmailDraft] = useState(`Dear Mike,
+function DeliverStep({ rfq }: { rfq: LiveRFQ }) {
+    const quote = rfq.quote ?? DEMO_QUOTE;
+    const total = quote.totals.total;
+    const [pdfLoading, setPdfLoading] = useState(false);
+    const [emailCopied, setEmailCopied] = useState(false);
+    const [emailDraft, setEmailDraft] = useState(
+        `Dear ${rfq.customerName.split(" ")[0]},
 
-Thank you for sending over the RFQ for the Ti-6Al-4V shaft assembly (DWG-4401 Rev C).
+Thank you for sending over the RFQ for ${rfq.subject}.
 
-We're pleased to provide the following quotation:
+We are pleased to provide the following quotation:
 
-• Quantity: 50 units
-• Unit Price: $582.84
-• Total: $29,142.15
-• Lead Time: 5–6 weeks ARO
+• Total: $${total.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+• Margin: ${Math.round(quote.totals.marginPct * 100)}%
+• Lead Time: TBD
 
-This quote is valid for 30 days. All units will include AS9100D material certifications, CMM first article inspection, and our standard 10% recurring dimensional sampling.
-
-Please see the attached PDF for the full cost breakdown and assumptions.
+This quote is valid for 30 days. Please see the attached PDF for the full cost breakdown and assumptions.
 
 Best regards,
 [Your Name]
-ForgeSight Manufacturing`);
-    const [pdfLoading, setPdfLoading] = useState(false);
-    const [emailCopied, setEmailCopied] = useState(false);
+ForgeSight Manufacturing`
+    );
 
     const handleDownloadPdf = async () => {
         setPdfLoading(true);
         try {
-            const res = await fetch(`/api/rfqs/${rfqId}/quote/pdf`);
+            const res = await fetch(`/api/rfqs/${rfq.id}/quote/pdf`);
             if (res.ok) {
                 const blob = await res.blob();
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
                 a.href = url;
-                a.download = `quote-${rfqId}.pdf`;
+                a.download = `quote-${rfq.id.slice(0, 8).toUpperCase()}.pdf`;
                 a.click();
                 URL.revokeObjectURL(url);
                 toast.success("PDF downloaded");
             } else {
-                toast.error("PDF generation failed — check server logs");
+                const err = await res.json().catch(() => ({}));
+                toast.error((err as { error?: string }).error ?? "PDF failed — generate quote first");
             }
         } catch {
-            toast.error("PDF not available in demo mode");
+            toast.error("PDF not available");
         } finally {
             setPdfLoading(false);
         }
@@ -611,23 +798,19 @@ ForgeSight Manufacturing`);
 
     return (
         <div className="space-y-4">
-            {/* Summary card */}
             <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-4 dark:border-emerald-900/30 dark:bg-emerald-950/20">
                 <div className="flex items-center gap-2 mb-2">
                     <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                    <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">
-                        Quote ready to send
-                    </p>
+                    <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">Quote ready to deliver</p>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div><span className="text-muted-foreground">Total:</span> <span className="font-bold">$29,142.15</span></div>
-                    <div><span className="text-muted-foreground">Unit price:</span> <span className="font-bold">$582.84</span></div>
-                    <div><span className="text-muted-foreground">Margin:</span> 20%</div>
-                    <div><span className="text-muted-foreground">Lead time:</span> 5–6 wks</div>
+                    <div><span className="text-muted-foreground">Total:</span> <span className="font-bold">${total.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span></div>
+                    <div><span className="text-muted-foreground">Margin:</span> <span className="font-bold">{Math.round(quote.totals.marginPct * 100)}%</span></div>
+                    <div><span className="text-muted-foreground">Items:</span> {quote.lineItems.length} line items</div>
+                    <div><span className="text-muted-foreground">Overhead:</span> ${quote.totals.overheadAmount.toFixed(2)}</div>
                 </div>
             </div>
 
-            {/* PDF download */}
             <Button
                 variant="outline"
                 className="w-full gap-2"
@@ -643,18 +826,12 @@ ForgeSight Manufacturing`);
 
             <Separator />
 
-            {/* Email draft */}
             <div>
                 <div className="mb-2 flex items-center justify-between">
                     <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                         Email Draft
                     </Label>
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 gap-1 px-2 text-xs"
-                        onClick={copyEmail}
-                    >
+                    <Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-xs" onClick={copyEmail}>
                         <Copy className="h-3 w-3" />
                         {emailCopied ? "Copied!" : "Copy"}
                     </Button>
@@ -684,24 +861,58 @@ function DocumentViewer({ text, title }: { text: string; title: string }) {
             <div className="flex items-center gap-2 border-b border-border px-4 py-3">
                 <FileText className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm font-semibold truncate">{title}</span>
-                <Badge variant="outline" className="ml-auto text-[10px]">Raw RFQ</Badge>
+                <Badge variant="outline" className="ml-auto flex-shrink-0 text-[10px]">Raw RFQ</Badge>
             </div>
             <div className="flex-1 overflow-y-auto p-4">
                 <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-foreground/80">
-                    {text}
+                    {text || "(No document text — paste RFQ content)"}
                 </pre>
             </div>
         </div>
     );
 }
 
-// ── Similar Jobs Card ───────────────────────────────────────────────────────
+// ── Similar Jobs Panel ──────────────────────────────────────────────────────
 
-function SimilarJobsPanel() {
-    const similar = [
-        { id: "rfq-004", customer: "MachTec Corp", subject: "Ti-6Al-4V shaft prototype", total: "$12,450", match: "87%" },
-        { id: "rfq-002", customer: "TechFlow Industries", subject: "Aluminum bracket — 500 units", total: "$8,200", match: "61%" },
-    ];
+function SimilarJobsPanel({ rfqId }: { rfqId: string }) {
+    type SimilarEntry = { id: string; customerName: string; subject: string; quote: { totals: { total: number } } | null; score: number; reasons: string[] };
+    const [similar, setSimilar] = useState<SimilarEntry[]>([]);
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        setLoading(true);
+        fetch(`/api/rfqs/${rfqId}/similar`)
+            .then(r => r.ok ? r.json() : null)
+            .then(async (data) => {
+                if (!data) return;
+                // API returns {results: [{id, score, reasons}]}
+                const results: Array<{ id: string; score: number; reasons: string[] }> =
+                    Array.isArray(data) ? data : (data.results ?? []);
+                // Enrich with RFQ data
+                const enriched = await Promise.all(
+                    results.slice(0, 3).map(async (r) => {
+                        try {
+                            const rfqRes = await fetch(`/api/rfqs/${r.id}`);
+                            const rfq = rfqRes.ok ? await rfqRes.json() : {};
+                            return {
+                                id: r.id,
+                                customerName: rfq.customerName ?? r.id.slice(0, 8),
+                                subject: rfq.subject ?? "—",
+                                quote: rfq.quote ?? null,
+                                score: r.score,
+                                reasons: r.reasons ?? [],
+                            };
+                        } catch {
+                            return { id: r.id, customerName: r.id.slice(0, 8), subject: "—", quote: null, score: r.score, reasons: r.reasons ?? [] };
+                        }
+                    })
+                );
+                setSimilar(enriched);
+            })
+            .catch(() => { })
+            .finally(() => setLoading(false));
+    }, [rfqId]);
+
     return (
         <div className="rounded-lg border border-border">
             <div className="flex items-center gap-2 border-b border-border px-3 py-2">
@@ -711,20 +922,36 @@ function SimilarJobsPanel() {
                 </span>
             </div>
             <div className="p-2 space-y-1">
+                {loading && <Skeleton className="h-10 w-full" />}
+                {!loading && similar.length === 0 && (
+                    <p className="px-2 py-3 text-[11px] text-muted-foreground">
+                        No similar jobs yet — quote a few RFQs first.
+                    </p>
+                )}
                 {similar.map((s) => (
-                    <div
+                    <Link
                         key={s.id}
-                        className="flex items-center gap-3 rounded-md px-2 py-2 hover:bg-accent cursor-pointer transition-colors"
+                        href={`/rfqs/${s.id}`}
+                        className="flex flex-col gap-1 rounded-md px-2 py-2 hover:bg-accent transition-colors"
                     >
-                        <div className="min-w-0 flex-1">
-                            <p className="text-xs font-medium truncate">{s.customer}</p>
-                            <p className="text-[10px] text-muted-foreground truncate">{s.subject}</p>
+                        <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-medium truncate">{s.customerName}</p>
+                            <span className="flex-shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-mono font-semibold text-muted-foreground">
+                                {s.score}pt
+                            </span>
                         </div>
-                        <div className="text-right flex-shrink-0">
-                            <p className="text-xs font-mono font-semibold">{s.total}</p>
-                            <p className="text-[10px] text-muted-foreground">{s.match} match</p>
-                        </div>
-                    </div>
+                        <p className="text-[10px] text-muted-foreground truncate">{s.subject}</p>
+                        {s.reasons.length > 0 && (
+                            <p className="text-[10px] text-muted-foreground/60 truncate">
+                                {s.reasons[0]}
+                            </p>
+                        )}
+                        {s.quote && (
+                            <p className="text-xs font-mono font-semibold text-foreground">
+                                ${s.quote.totals.total.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                            </p>
+                        )}
+                    </Link>
                 ))}
             </div>
         </div>
@@ -736,45 +963,77 @@ function SimilarJobsPanel() {
 export default function RfqDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
 
-    // Try to load from live API, fall back to mock data
-    const [rfq, setRfq] = useState<MockRFQ>(MOCK_RFQS.find(r => r.id === id) ?? DEMO_RFQ);
-
-    useEffect(() => {
-        fetch(`/api/rfqs/${id}`)
-            .then(r => r.ok ? r.json() : null)
-            .then((data) => {
-                if (data) {
-                    setRfq({
-                        id: data.id,
-                        customerName: data.customerName,
-                        subject: data.subject,
-                        status: "needs_review" as const,
-                        risk: "MEDIUM" as const,
-                        updatedAt: "Just now",
-                        confidence: 0.75,
-                        rawText: data.rawText ?? "",
-                    });
-                }
-            })
-            .catch(() => { /* keep mock */ });
-    }, [id]);
-
+    const [rfq, setRfq] = useState<LiveRFQ | null>(null);
+    const [loadingRfq, setLoadingRfq] = useState(true);
     const [activeStep, setActiveStep] = useState(1);
     const [stepStates, setStepStates] = useState<StepState[]>([
         "active", "pending", "pending", "pending", "pending",
     ]);
 
-    const completeStep = useCallback((stepIdx: number) => {
+    // Load RFQ from API (with mock fallback for demo IDs)
+    useEffect(() => {
+        const mockRfq = id.startsWith("rfq-")
+            ? ({ id, customerName: DEMO_RFQ.customerName, subject: DEMO_RFQ.subject, status: "NEW", rawText: DEMO_RFQ.rawText, extractedFields: [], clarifier: undefined, clarifierAnswers: {}, confirmedAssumptions: [], quote: null, createdAt: new Date().toISOString() } as LiveRFQ)
+            : null;
+
+        fetch(`/api/rfqs/${id}`)
+            .then(r => r.ok ? r.json() : null)
+            .then((data: LiveRFQ | null) => {
+                if (data) {
+                    setRfq(data);
+                    // Determine initial step from status + data
+                    const statusStep = statusToStep(data.status);
+                    const hasExtracted = data.extractedFields.length > 0;
+                    const hasQuote = !!data.quote;
+                    let step = statusStep + 1;
+                    if (!hasExtracted) step = 1;
+                    else if (hasQuote) step = 5;
+                    setActiveStep(step);
+                    // Mark completed steps
+                    setStepStates(prev => {
+                        const next = [...prev];
+                        for (let i = 0; i < step - 1; i++) next[i] = "complete";
+                        if (step - 1 < next.length) next[step - 1] = "active";
+                        return next;
+                    });
+                } else if (mockRfq) {
+                    setRfq(mockRfq);
+                }
+            })
+            .catch(() => { if (mockRfq) setRfq(mockRfq); })
+            .finally(() => setLoadingRfq(false));
+    }, [id]);
+
+    const handleRfqUpdate = useCallback((updated: LiveRFQ) => {
+        if (updated?.id) setRfq(updated);
+    }, []);
+
+    const completeStep = useCallback((stepIdx: number, updated?: LiveRFQ) => {
+        if (updated?.id) setRfq(updated);
         setStepStates(prev => {
             const next = [...prev];
             next[stepIdx] = "complete";
             if (stepIdx + 1 < next.length) {
                 next[stepIdx + 1] = "active";
-                setActiveStep(stepIdx + 2); // 1-indexed
+                setActiveStep(stepIdx + 2);
             }
             return next;
         });
     }, []);
+
+    const completedCount = stepStates.filter(s => s === "complete").length;
+    const progressPct = (completedCount / STEPS.length) * 100;
+
+    if (loadingRfq || !rfq) {
+        return (
+            <div className="flex h-screen items-center justify-center">
+                <div className="flex flex-col items-center gap-3">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">Loading RFQ…</p>
+                </div>
+            </div>
+        );
+    }
 
     const renderStepContent = () => {
         switch (activeStep) {
@@ -782,25 +1041,52 @@ export default function RfqDetailPage({ params }: { params: Promise<{ id: string
                 return (
                     <ExtractStep
                         rfqId={rfq.id}
-                        rawText={rfq.rawText}
-                        onComplete={() => completeStep(0)}
+                        alreadyExtracted={rfq.extractedFields.length > 0}
+                        onComplete={(updated) => completeStep(0, updated)}
                     />
                 );
             case 2:
-                return <ReviewStep onComplete={() => completeStep(1)} />;
+                return (
+                    <ReviewStep
+                        rfqId={rfq.id}
+                        fields={rfq.extractedFields}
+                        onComplete={(updated) => completeStep(1, updated)}
+                    />
+                );
             case 3:
-                return <ClarifyStep onComplete={() => completeStep(2)} />;
+                return (
+                    <ClarifyStep
+                        rfqId={rfq.id}
+                        clarifier={rfq.clarifier}
+                        savedAnswers={rfq.clarifierAnswers}
+                        savedAssumptions={rfq.confirmedAssumptions}
+                        onComplete={(updated) => completeStep(2, updated)}
+                    />
+                );
             case 4:
-                return <QuoteStep onComplete={() => completeStep(3)} />;
+                return (
+                    <QuoteStep
+                        rfqId={rfq.id}
+                        existingQuote={rfq.quote}
+                        onComplete={(updated) => {
+                            if (updated?.id) setRfq(updated);
+                            completeStep(3, updated);
+                        }}
+                    />
+                );
             case 5:
-                return <DeliverStep rfqId={rfq.id} />;
+                return <DeliverStep rfq={rfq} />;
             default:
                 return null;
         }
     };
 
-    const completedCount = stepStates.filter(s => s === "complete").length;
-    const progressPct = (completedCount / STEPS.length) * 100;
+    const riskLevel = rfq.extractedFields.length > 0
+        ? (() => {
+            const avg = rfq.extractedFields.reduce((s, f) => s + f.confidence, 0) / rfq.extractedFields.length;
+            return avg >= 0.85 ? "LOW" : avg >= 0.7 ? "MEDIUM" : "HIGH";
+        })()
+        : "—";
 
     return (
         <div className="flex h-screen flex-col overflow-hidden">
@@ -824,14 +1110,21 @@ export default function RfqDetailPage({ params }: { params: Promise<{ id: string
                             <Progress value={progressPct} className="h-1.5" />
                         </div>
                     </div>
-                    <Badge
-                        variant="outline"
-                        className={cn(
-                            "text-[10px]",
-                            rfq.risk === "HIGH" ? "border-red-200 text-red-600" : "border-amber-200 text-amber-600"
-                        )}
-                    >
-                        {rfq.risk} RISK
+                    {riskLevel !== "—" && (
+                        <Badge
+                            variant="outline"
+                            className={cn(
+                                "text-[10px]",
+                                riskLevel === "HIGH" ? "border-red-200 text-red-600"
+                                    : riskLevel === "MEDIUM" ? "border-amber-200 text-amber-600"
+                                        : "border-emerald-200 text-emerald-600"
+                            )}
+                        >
+                            {riskLevel} RISK
+                        </Badge>
+                    )}
+                    <Badge variant="outline" className="font-mono text-[10px] text-muted-foreground">
+                        {rfq.status}
                     </Badge>
                 </div>
             </header>
@@ -840,10 +1133,13 @@ export default function RfqDetailPage({ params }: { params: Promise<{ id: string
             <div className="flex flex-1 overflow-hidden">
                 {/* Document viewer */}
                 <div className="hidden w-[42%] border-r border-border lg:flex lg:flex-col">
-                    <DocumentViewer text={rfq.rawText} title={`${rfq.customerName} — ${rfq.id}`} />
+                    <DocumentViewer
+                        text={rfq.rawText}
+                        title={`${rfq.customerName} — ${rfq.id.slice(0, 8).toUpperCase()}`}
+                    />
                 </div>
 
-                {/* Right side: stepper + content */}
+                {/* Right side: stepper nav + content */}
                 <div className="flex flex-1 flex-col overflow-hidden">
                     {/* Step nav */}
                     <div className="border-b border-border bg-background px-4 py-2">
@@ -867,7 +1163,7 @@ export default function RfqDetailPage({ params }: { params: Promise<{ id: string
                     {/* Step content */}
                     <div className="flex flex-1 overflow-hidden">
                         <div className="flex-1 overflow-y-auto p-5">
-                            <div className="mx-auto max-w-[560px] space-y-1">
+                            <div className="mx-auto max-w-[560px]">
                                 <div className="mb-4">
                                     <h2 className="text-base font-bold">
                                         Step {activeStep}: {STEPS[activeStep - 1]?.label}
@@ -882,7 +1178,7 @@ export default function RfqDetailPage({ params }: { params: Promise<{ id: string
 
                         {/* Similar jobs sidebar */}
                         <div className="hidden w-[240px] flex-col gap-3 border-l border-border p-4 xl:flex">
-                            <SimilarJobsPanel />
+                            <SimilarJobsPanel rfqId={rfq.id} />
                         </div>
                     </div>
                 </div>

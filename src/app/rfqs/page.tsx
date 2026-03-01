@@ -204,13 +204,20 @@ function AskPanel() {
             const res = await fetch("/api/assistant/query", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query }),
+                body: JSON.stringify({ question: query }),
             });
             if (res.ok) {
                 const data = await res.json();
-                setAnswer(data.answer ?? data.summary ?? "No answer returned.");
+                // API returns {answer, citations} or {error}
+                const ans = data.answer ?? data.summary ?? data.narrative;
+                const citations = (data.citations ?? []) as Array<{ rfqId?: string; id?: string }>;
+                const citStr = citations.length > 0
+                    ? "\n\nCiting: " + citations.map((c) => c.rfqId ?? c.id ?? "?").join(", ")
+                    : "";
+                setAnswer(ans ? ans + citStr : "No answer returned — check GEMINI_API_KEY.");
             } else {
-                setAnswer("AI assistant unavailable — check GEMINI_API_KEY.");
+                const err = await res.json().catch(() => ({}));
+                setAnswer((err as { error?: string }).error ?? "AI assistant unavailable — check GEMINI_API_KEY.");
             }
         } catch {
             setAnswer("Connection error. Is the dev server running?");
@@ -299,26 +306,7 @@ export default function RfqsPage() {
     const [loadingDemo, setLoadingDemo] = useState(false);
 
     // Auto-load from live API on mount
-    useEffect(() => {
-        fetch("/api/rfqs")
-            .then(r => r.ok ? r.json() : null)
-            .then((data) => {
-                if (Array.isArray(data) && data.length > 0) {
-                    const mapped: MockRFQ[] = data.map((r: { id: string; customerName: string; subject: string; status: string; rawText?: string; extractedFields?: Array<{ confidence: number }> }) => ({
-                        id: r.id,
-                        customerName: r.customerName,
-                        subject: r.subject,
-                        status: mapApiStatus(r.status),
-                        risk: computeRisk(r.extractedFields ?? []),
-                        updatedAt: "Just now",
-                        confidence: avgConfidence(r.extractedFields ?? []),
-                        rawText: r.rawText ?? "",
-                    }));
-                    setRfqs(mapped);
-                }
-            })
-            .catch(() => { /* keep mock data */ });
-    }, []);
+    useEffect(() => { refreshFromApi(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const filtered = useMemo(() => {
         const statuses = TAB_FILTERS[tab] ?? [];
@@ -340,34 +328,56 @@ export default function RfqsPage() {
         return map;
     }, [rfqs]);
 
+    const refreshFromApi = async () => {
+        try {
+            const res = await fetch("/api/rfqs");
+            if (!res.ok) return;
+            const data = await res.json();
+            if (!Array.isArray(data)) return;
+            const mapped: MockRFQ[] = data.map((r: {
+                id: string; customerName: string; subject: string;
+                status: string; rawText?: string; extractedFields?: Array<{ confidence: number }>;
+                createdAt?: string;
+            }) => ({
+                id: r.id,
+                customerName: r.customerName,
+                subject: r.subject,
+                status: mapApiStatus(r.status),
+                risk: computeRisk(r.extractedFields ?? []),
+                updatedAt: r.createdAt ? timeAgo(r.createdAt) : "just now",
+                confidence: avgConfidence(r.extractedFields ?? []),
+                rawText: r.rawText ?? "",
+            }));
+            setRfqs(mapped.length > 0 ? mapped : MOCK_RFQS);
+        } catch {
+            setRfqs(MOCK_RFQS);
+        }
+    };
+
     const handleLoadDemo = async () => {
         setLoadingDemo(true);
         try {
-            // Check if live API is available
-            const res = await fetch("/api/rfqs");
+            // Create a fresh demo RFQ via the API and navigate to it
+            const res = await fetch("/api/rfqs", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    customerName: DEMO_RFQ.customerName,
+                    subject: DEMO_RFQ.subject,
+                    rawText: DEMO_RFQ.rawText,
+                }),
+            });
             if (res.ok) {
-                const data = await res.json();
-                if (Array.isArray(data) && data.length > 0) {
-                    // Map API status to UI status
-                    const mapped: MockRFQ[] = data.map((r: { id: string; customerName: string; subject: string; status: string; rawText?: string; extractedFields?: Array<{ confidence: number }> }) => ({
-                        id: r.id,
-                        customerName: r.customerName,
-                        subject: r.subject,
-                        status: mapApiStatus(r.status),
-                        risk: computeRisk(r.extractedFields ?? []),
-                        updatedAt: "Just now",
-                        confidence: avgConfidence(r.extractedFields ?? []),
-                        rawText: r.rawText ?? "",
-                    }));
-                    setRfqs(mapped);
-                    toast.success(`Loaded ${mapped.length} RFQs from API`);
-                    return;
-                }
+                const created = await res.json();
+                toast.success("Demo RFQ created — opening stepper");
+                await refreshFromApi();
+                router.push(`/rfqs/${created.id}`);
+                return;
             }
-        } catch { /* fall through to mock */ }
-        // Fall back to mock data
+        } catch { /* fall through */ }
+        // Offline fallback: just show mocks in the list
         setRfqs(MOCK_RFQS);
-        toast.success("Loaded 5 demo RFQs (mock mode)");
+        toast.success("Loaded 5 demo RFQs (offline mode)");
         setLoadingDemo(false);
     };
 
@@ -396,7 +406,7 @@ export default function RfqsPage() {
                         <Upload className="h-3.5 w-3.5" />
                         Upload RFQ
                     </Button>
-                    <NewRfqDialog onCreated={() => setRfqs([...MOCK_RFQS])} />
+                    <NewRfqDialog onCreated={refreshFromApi} />
                 </div>
             </header>
 
@@ -568,4 +578,14 @@ function computeRisk(fields: Array<{ confidence: number }>): MockRFQ["risk"] {
 function avgConfidence(fields: Array<{ confidence: number }>): number {
     if (!fields.length) return 0.5;
     return fields.reduce((s, f) => s + f.confidence, 0) / fields.length;
+}
+
+function timeAgo(isoString: string): string {
+    const diff = Date.now() - new Date(isoString).getTime();
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return "just now";
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    return `${Math.floor(h / 24)}d ago`;
 }
