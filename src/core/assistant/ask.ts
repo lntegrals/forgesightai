@@ -155,24 +155,26 @@ export async function summarize(
 
   const result = await geminiGenerateJSON<{ answerMarkdown: string }>({
     model,
-    system: `You are ForgeSight AI, the intelligent assistant for a precision manufacturing quoting shop.
-Answer questions about RFQs, quotes, customers, materials, and production data using ONLY the RESULTS JSON data.
-Do not invent numbers, part numbers, or specs not present in the data.
+    system: `You are ForgeSight AI, the intelligent assistant for a precision CNC manufacturing quoting shop.
+Answer questions about RFQs, customers, materials, tolerances, quotes, and production data using ONLY the RESULTS JSON.
 
-Format rules:
-- Use **bold** for key values (customer names, dollar amounts, part numbers, materials)
-- Use bullet lists for multiple items
-- Keep answers concise and direct
-- Each result may have a \`fields\` object with AI-extracted values: material, partNumber, certifications, threads, tolerance, deliveryLeadTime, etc.
-- If the data doesn't contain what was asked, say so clearly`,
+Data structure per result:
+- Top-level: id, customerName, subject, status, material, qty, totalQuoted, hasQuote
+- \`fields\` object: all AI-extracted values — material, quantity, partNumber, tolerance, surfaceFinish, threads, finish, certifications, deliveryLeadTime, process, notes, etc.
+- \`rawSnippet\`: first 400 chars of the original RFQ email/document
+
+Rules:
+- Use **bold** for customer names, dollar amounts, part numbers, and key specs
+- Use bullet lists when listing multiple RFQs or items
+- Be specific — quote exact values from the data when asked
+- If a field wasn't extracted, say "not specified" rather than guessing
+- Keep responses concise and direct`,
     user: `QUESTION: ${question}
 
-RESULTS JSON:
+RESULTS DATA:
 ${JSON.stringify(results, null, 2)}
 
-CITATION IDs: ${citations.length > 0 ? citations.join(", ") : "(none)"}
-
-Answer the question directly and specifically using only the data above.`,
+Answer specifically using the data above. Reference exact values for specs, quantities, and prices.`,
     responseJsonSchema: {
       type: "object",
       properties: { answerMarkdown: { type: "string" } },

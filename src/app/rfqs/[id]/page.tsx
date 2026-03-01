@@ -424,12 +424,14 @@ function ClarifyStep({
     clarifier: liveClarifier,
     savedAnswers,
     savedAssumptions,
+    onRfqUpdate,
     onComplete,
 }: {
     rfqId: string;
     clarifier?: ClarifierOutput;
     savedAnswers?: Record<string, string>;
     savedAssumptions?: string[];
+    onRfqUpdate?: (updated: LiveRFQ) => void;
     onComplete: (updated: LiveRFQ) => void;
 }) {
     const cl = liveClarifier ?? null;
@@ -458,6 +460,7 @@ function ClarifyStep({
     const [localAnswers, setLocalAnswers] = useState<Record<string, string>>(savedAnswers ?? {});
     const [confirmedIds, setConfirmedIds] = useState<Set<string>>(new Set(savedAssumptions ?? []));
     const [saving, setSaving] = useState(false);
+    const [generating, setGenerating] = useState(false);
 
     const requiredDone = questions.filter(q => q.required).every(
         q => localAnswers[q.id]?.trim()
@@ -465,11 +468,29 @@ function ClarifyStep({
     const allAssumptionsConfirmed = assumptions.length === 0 || assumptions.every(a => confirmedIds.has(a.id));
     const canProceed = requiredDone && allAssumptionsConfirmed;
 
+    const handleGenerate = async () => {
+        setGenerating(true);
+        try {
+            const res = await fetch(`/api/rfqs/${rfqId}/clarify`, { method: "POST" });
+            if (res.ok) {
+                const updated: LiveRFQ = await res.json();
+                toast.success("AI questions generated");
+                onRfqUpdate?.(updated);
+            } else {
+                const err = await res.json().catch(() => ({}));
+                toast.error((err as { error?: string }).error ?? "Failed to generate questions");
+            }
+        } catch {
+            toast.error("Network error");
+        } finally {
+            setGenerating(false);
+        }
+    };
+
     const handleProceed = async () => {
         setSaving(true);
         try {
             const assumptionIds = Array.from(confirmedIds);
-
             const res = await fetch(`/api/rfqs/${rfqId}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
@@ -492,26 +513,45 @@ function ClarifyStep({
         }
     };
 
-    // No real AI clarifier — offer simple bypass
+    // No real AI clarifier — offer generate + bypass
     if (!hasClarifier) {
         return (
-            <div className="space-y-4">
-                <div className="rounded-lg border border-border bg-muted/30 p-4">
+            <div className="space-y-3">
+                <div className="rounded-lg border border-violet-200/60 bg-violet-50/30 dark:border-violet-900/30 dark:bg-violet-950/10 p-4">
                     <div className="flex items-start gap-3">
-                        <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                        <div>
-                            <p className="text-sm font-medium">No AI clarifier for this RFQ</p>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                                Re-run extraction from Step 1 to generate RFQ-specific questions, or proceed directly to quoting.
+                        <Sparkles className="mt-0.5 h-4 w-4 flex-shrink-0 text-violet-500" />
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium">Generate AI clarifying questions</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                                Gemini will read this specific RFQ and generate targeted questions about tolerances, certifications, delivery terms, and other ambiguous specs that affect pricing.
                             </p>
                         </div>
                     </div>
                 </div>
-                <Button onClick={handleProceed} disabled={saving} className="w-full gap-2">
+                <Button
+                    onClick={handleGenerate}
+                    disabled={generating}
+                    className="w-full gap-2"
+                >
+                    {generating ? (
+                        <><Loader2 className="h-4 w-4 animate-spin" /> Gemini is reading the RFQ…</>
+                    ) : (
+                        <><Sparkles className="h-4 w-4" /> Generate Questions with AI</>
+                    )}
+                </Button>
+                <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                        <span className="w-full border-t border-border" />
+                    </div>
+                    <div className="relative flex justify-center">
+                        <span className="bg-background px-2 text-[10px] text-muted-foreground uppercase tracking-wider">or</span>
+                    </div>
+                </div>
+                <Button variant="outline" onClick={handleProceed} disabled={saving || generating} className="w-full gap-2">
                     {saving ? (
                         <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
                     ) : (
-                        <><Calculator className="h-4 w-4" /> Proceed to Quote Builder</>
+                        <><Calculator className="h-4 w-4" /> Skip & Proceed to Quote Builder</>
                     )}
                 </Button>
             </div>
@@ -1279,6 +1319,7 @@ export default function RfqDetailPage({ params }: { params: Promise<{ id: string
                         clarifier={rfq.clarifier}
                         savedAnswers={rfq.clarifierAnswers}
                         savedAssumptions={rfq.confirmedAssumptions}
+                        onRfqUpdate={handleRfqUpdate}
                         onComplete={(updated) => completeStep(2, updated)}
                     />
                 );
