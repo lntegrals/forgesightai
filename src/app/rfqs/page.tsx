@@ -190,6 +190,57 @@ function NewRfqDialog({ onCreated }: { onCreated: () => void }) {
     );
 }
 
+// ── Simple Markdown renderer (no external dep) ──────────────────────────────
+
+function SimpleMarkdown({ text }: { text: string }) {
+    if (!text) return null;
+
+    const renderInline = (content: string, keyPrefix: string) => {
+        const parts = content.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+        return parts.map((part, j) => {
+            const key = `${keyPrefix}-${j}`;
+            if (part.startsWith("**") && part.endsWith("**"))
+                return <strong key={key} className="font-semibold text-foreground">{part.slice(2, -2)}</strong>;
+            if (part.startsWith("`") && part.endsWith("`"))
+                return <code key={key} className="rounded bg-muted px-1 font-mono text-[10px]">{part.slice(1, -1)}</code>;
+            return <span key={key}>{part}</span>;
+        });
+    };
+
+    const lines = text.split("\n");
+    const elements: React.ReactNode[] = [];
+    const bullets: React.ReactNode[] = [];
+
+    const flushBullets = (k: string) => {
+        if (bullets.length) {
+            elements.push(<ul key={k} className="my-0.5 space-y-0.5">{[...bullets]}</ul>);
+            bullets.length = 0;
+        }
+    };
+
+    lines.forEach((line, i) => {
+        const key = `l${i}`;
+        if (/^[-*•]\s/.test(line)) {
+            bullets.push(
+                <li key={key} className="flex gap-1.5 text-xs">
+                    <span className="mt-px select-none text-muted-foreground">·</span>
+                    <span className="leading-relaxed">{renderInline(line.slice(2), key)}</span>
+                </li>
+            );
+        } else {
+            flushBullets(`ul${i}`);
+            if (line.trim() === "") {
+                if (elements.length) elements.push(<div key={key} className="h-1" />);
+            } else {
+                elements.push(<p key={key} className="text-xs leading-relaxed">{renderInline(line, key)}</p>);
+            }
+        }
+    });
+    flushBullets("ul-end");
+
+    return <div className="space-y-0.5">{elements}</div>;
+}
+
 // ── Ask ForgeSight Panel ────────────────────────────────────────────────────
 
 // ── Ask Result type ──────────────────────────────────────────────────────────
@@ -246,9 +297,9 @@ function AskPanel() {
 
     const SUGGESTIONS = [
         "Show all RFQs in the pipeline",
-        "Which RFQs have a quote ready?",
-        "List sent quotes",
-        "What's quoted for aluminum parts?",
+        "Which RFQs are titanium jobs?",
+        "What's the total quoted pipeline value?",
+        "Which jobs need review?",
     ];
 
     const hasResults = (result?.results?.length ?? 0) > 0;
@@ -317,9 +368,7 @@ function AskPanel() {
                                 {result.usedFallbackPlan ? "Search Results" : "Gemini Answer"}
                             </span>
                         </div>
-                        <p className="text-xs leading-relaxed text-foreground whitespace-pre-wrap">
-                            {result.answerMarkdown}
-                        </p>
+                        <SimpleMarkdown text={result.answerMarkdown} />
                     </div>
                 )}
 

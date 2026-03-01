@@ -155,15 +155,24 @@ export async function summarize(
 
   const result = await geminiGenerateJSON<{ answerMarkdown: string }>({
     model,
-    system: `You are ForgeSight AI assistant for a manufacturing shop. Answer questions about RFQs and quotes using ONLY the data provided in the RESULTS JSON. Do not invent numbers or facts not present in the data. Use Markdown formatting. Cite RFQ IDs inline using the format [rfq-id].`,
+    system: `You are ForgeSight AI, the intelligent assistant for a precision manufacturing quoting shop.
+Answer questions about RFQs, quotes, customers, materials, and production data using ONLY the RESULTS JSON data.
+Do not invent numbers, part numbers, or specs not present in the data.
+
+Format rules:
+- Use **bold** for key values (customer names, dollar amounts, part numbers, materials)
+- Use bullet lists for multiple items
+- Keep answers concise and direct
+- Each result may have a \`fields\` object with AI-extracted values: material, partNumber, certifications, threads, tolerance, deliveryLeadTime, etc.
+- If the data doesn't contain what was asked, say so clearly`,
     user: `QUESTION: ${question}
 
 RESULTS JSON:
 ${JSON.stringify(results, null, 2)}
 
-AVAILABLE CITATION IDs: ${citations.length > 0 ? citations.join(", ") : "(none)"}
+CITATION IDs: ${citations.length > 0 ? citations.join(", ") : "(none)"}
 
-Write a concise Markdown answer using only the data above. Cite relevant RFQ IDs inline.`,
+Answer the question directly and specifically using only the data above.`,
     responseJsonSchema: {
       type: "object",
       properties: { answerMarkdown: { type: "string" } },

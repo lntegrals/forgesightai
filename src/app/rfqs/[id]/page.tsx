@@ -31,7 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { DEMO_RFQ, DEMO_EXTRACTED_FIELDS, DEMO_CLARIFIER, DEMO_QUOTE } from "@/lib/mock-rfqs";
+import { DEMO_RFQ, DEMO_EXTRACTED_FIELDS, DEMO_QUOTE } from "@/lib/mock-rfqs";
 import { toast } from "sonner";
 import type { ExtractedField, ClarifierOutput, Quote } from "@/core/types";
 
@@ -432,11 +432,9 @@ function ClarifyStep({
     savedAssumptions?: string[];
     onComplete: (updated: LiveRFQ) => void;
 }) {
-    // Use live clarifier if available, otherwise fall back to mock
     const cl = liveClarifier ?? null;
     const hasClarifier = !!cl;
 
-    // Map ClarifierOutput to UI shape (or use DEMO_CLARIFIER)
     const questions = hasClarifier
         ? cl.questions.map(q => ({
             id: q.id,
@@ -447,21 +445,15 @@ function ClarifyStep({
             options: q.options as string[] | undefined,
             answer: savedAnswers?.[q.id] ?? null as string | null,
         }))
-        : DEMO_CLARIFIER.questions.map(q => ({
-            ...q,
-            rationale: "",
-            confidence: 0.8,
-            options: undefined as string[] | undefined,
-            answer: q.answer as string | null,
-        }));
+        : [];
 
     const assumptions = hasClarifier
         ? cl.assumptions.map(a => ({ id: a.id, text: a.assumption, confidence: a.confidence }))
-        : DEMO_CLARIFIER.assumptions.map((a, i) => ({ id: `a${i}`, text: a, confidence: 0.9 }));
+        : [];
 
     const riskFlags = hasClarifier
         ? cl.riskFlags.map(r => ({ id: r.id, text: r.label, severity: r.severity, evidenceSnippet: r.evidenceSnippet }))
-        : DEMO_CLARIFIER.riskFlags.map((r, i) => ({ id: `r${i}`, text: r, severity: "high" as const, evidenceSnippet: "" }));
+        : [];
 
     const [localAnswers, setLocalAnswers] = useState<Record<string, string>>(savedAnswers ?? {});
     const [confirmedIds, setConfirmedIds] = useState<Set<string>>(new Set(savedAssumptions ?? []));
@@ -488,7 +480,7 @@ function ClarifyStep({
             });
             if (res.ok) {
                 const updated: LiveRFQ = await res.json();
-                toast.success("Clarifications saved — quote unlocked");
+                toast.success(hasClarifier ? "Clarifications saved — quote unlocked" : "Proceeding to quote builder");
                 onComplete(updated);
             } else {
                 toast.error("Failed to save clarifications");
@@ -500,6 +492,32 @@ function ClarifyStep({
         }
     };
 
+    // No real AI clarifier — offer simple bypass
+    if (!hasClarifier) {
+        return (
+            <div className="space-y-4">
+                <div className="rounded-lg border border-border bg-muted/30 p-4">
+                    <div className="flex items-start gap-3">
+                        <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                        <div>
+                            <p className="text-sm font-medium">No AI clarifier for this RFQ</p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                                Re-run extraction from Step 1 to generate RFQ-specific questions, or proceed directly to quoting.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                <Button onClick={handleProceed} disabled={saving} className="w-full gap-2">
+                    {saving ? (
+                        <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
+                    ) : (
+                        <><Calculator className="h-4 w-4" /> Proceed to Quote Builder</>
+                    )}
+                </Button>
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-4">
             {/* Questions */}
@@ -508,14 +526,10 @@ function ClarifyStep({
                     <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                         Questions
                     </p>
-                    {hasClarifier ? (
-                        <Badge variant="outline" className="gap-1 text-[10px] border-violet-200 text-violet-700 dark:border-violet-900/50 dark:text-violet-400">
-                            <Sparkles className="h-2.5 w-2.5" />
-                            Gemini{cl.model ? ` · ${cl.model.split("-").slice(-2).join("-")}` : ""}
-                        </Badge>
-                    ) : (
-                        <Badge variant="outline" className="text-[10px] text-muted-foreground">Demo</Badge>
-                    )}
+                    <Badge variant="outline" className="gap-1 text-[10px] border-violet-200 text-violet-700 dark:border-violet-900/50 dark:text-violet-400">
+                        <Sparkles className="h-2.5 w-2.5" />
+                        Gemini{cl.model ? ` · ${cl.model.split("-").slice(-2).join("-")}` : ""}
+                    </Badge>
                 </div>
                 <div className="space-y-3">
                     {questions.map((q) => {

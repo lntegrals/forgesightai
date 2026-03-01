@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { planQuery, runPlan, summarize } from "@/core/assistant/ask";
+import { getRfq } from "@/core/store";
 import type { QueryPlan } from "@/core/assistant/schema";
 
 // Build a simple non-AI summary when Gemini is unavailable
@@ -15,6 +16,27 @@ function buildFallbackSummary(question: string, results: unknown): string {
   });
   const more = results.length > 6 ? `\n\n_…and ${results.length - 6} more._` : "";
   return `Found **${results.length}** RFQ${results.length !== 1 ? "s" : ""}:\n\n${lines.join("\n")}${more}`;
+}
+
+// Enrich DerivedRFQ results with extracted field values so Gemini can answer
+// questions about part numbers, certifications, threads, etc.
+function enrichResults(results: unknown): unknown {
+  if (!Array.isArray(results)) return results;
+  return results.map((r: Record<string, unknown>) => {
+    const id = r.id as string | undefined;
+    if (!id) return r;
+    const full = getRfq(id);
+    if (!full) return r;
+    // Flatten extractedFields into a key→value map for easy reading by Gemini
+    const fields: Record<string, string> = {};
+    for (const f of full.extractedFields) {
+      fields[f.key] = f.userOverrideValue ?? f.value;
+    }
+    // Include raw RFQ subject, customer, and fields — omit noisy internal props
+    const { searchText: _st, qtyBucket: _qb, toleranceBand: _tb, ...rest } = r as Record<string, unknown>;
+    void _st; void _qb; void _tb;
+    return { ...rest, fields };
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -72,21 +94,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Enrich results with extracted field data so Gemini can answer specific questions
+  const enrichedResults = enrichResults(execResult.results);
+
   // Step 3: Summarize — fall back to local summary if Gemini unavailable
   let answerMarkdown: string | null = null;
   let summaryError: string | null = null;
 
   if (!usedFallbackPlan) {
-    const sumResult = await summarize(question, execResult.results, execResult.citations);
+    const sumResult = await summarize(question, enrichedResults, execResult.citations);
     if (sumResult.ok) {
       answerMarkdown = sumResult.answerMarkdown;
     } else {
       summaryError = sumResult.error;
-      // Build a local fallback summary from results
       answerMarkdown = buildFallbackSummary(question, execResult.results);
     }
   } else {
-    // Planner was rate-limited — use local summary directly
     answerMarkdown = buildFallbackSummary(question, execResult.results);
   }
 
