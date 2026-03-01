@@ -12,12 +12,12 @@ import {
 import { getSeedRFQs } from "./seed";
 
 // ── File-backed store ─────────────────────────────────────────────────────────
-// Persists to .data/rfqs.json in the project root so data survives:
-//   - HMR module reloads
-//   - Multiple Next.js dev worker processes
-//   - Server restarts
+// On Vercel (serverless): writes go to /tmp which is writable per-instance.
+// On local dev: persists to .data/rfqs.json in the project root.
 
-const DATA_DIR = path.join(process.cwd(), ".data");
+const DATA_DIR = process.env.VERCEL
+  ? "/tmp/.forgesight"
+  : path.join(process.cwd(), ".data");
 const DATA_FILE = path.join(DATA_DIR, "rfqs.json");
 
 function readFile(): Map<string, RFQ> {
