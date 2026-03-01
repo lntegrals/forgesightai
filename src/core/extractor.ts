@@ -73,7 +73,7 @@ export async function cleanRfqText(rawText: string): Promise<
   | { ok: true; cleaning: RfqCleaning; meta: ExtractionMeta }
   | { ok: false; error: string }
 > {
-  const model = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
+  const model = process.env.GEMINI_MODEL ?? "gemini-2.5-flash-lite";
 
   const result = await geminiGenerateJSON<{
     cleanedText: string;
@@ -119,7 +119,7 @@ export async function extractFieldsGemini(args: {
   rawText: string;
   cleanedText?: string;
 }): Promise<{ ok: true; fields: ExtractedField[]; meta: ExtractionMeta } | { ok: false; error: string }> {
-  const model = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
+  const model = process.env.GEMINI_MODEL ?? "gemini-2.5-flash-lite";
   const textToUse = args.cleanedText ?? args.rawText;
 
   const result = await geminiGenerateJSON<{

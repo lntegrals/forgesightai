@@ -30,7 +30,7 @@ async function derivePricingInputsAI(
 ): Promise<PricingInputs | null> {
   if (!process.env.GEMINI_API_KEY) return null;
 
-  const model = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
+  const model = process.env.GEMINI_MODEL ?? "gemini-2.5-flash-lite";
   const fieldSummary = fields
     .map((f) => `${f.label}: ${f.userOverrideValue ?? f.value}`)
     .join("\n");

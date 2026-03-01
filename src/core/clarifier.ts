@@ -66,7 +66,7 @@ export async function generateClarifier(rfq: {
     return { ok: false, error: "GEMINI_API_KEY not set" };
   }
 
-  const model = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
+  const model = process.env.GEMINI_MODEL ?? "gemini-2.5-flash-lite";
   const textToUse = rfq.cleaning?.cleanedText ?? rfq.rawText;
 
   const fieldsJson = JSON.stringify(
